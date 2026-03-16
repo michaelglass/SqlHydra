@@ -128,7 +128,29 @@ let ``Where Not Like``() =
     sql =! """SELECT * FROM "person"."address" AS "a" WHERE (NOT ("a"."city" ilike @p0))"""
 
 [<Test>]
-let ``Or Where``() = 
+let ``Where Like``() =
+    let sql =
+        select {
+            for a in person.address do
+            where (a.city =% "S%")
+        }
+        |> toSql
+
+    sql =! """SELECT * FROM "person"."address" AS "a" WHERE ("a"."city" ilike @p0)"""
+
+[<Test>]
+let ``Where like function``() =
+    let sql =
+        select {
+            for a in person.address do
+            where (like a.city "S%")
+        }
+        |> toSql
+
+    sql =! """SELECT * FROM "person"."address" AS "a" WHERE ("a"."city" ilike @p0)"""
+
+[<Test>]
+let ``Or Where``() =
     let sql =  
         select {
             for a in person.address do
