@@ -73,7 +73,51 @@ let ``Where with Option Type``() =
     sql.Contains("IS NOT NULL") =! true
 
 [<Test>]
-let ``Where Not Like``() = 
+let ``Where with Option Type After Join``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            where (o.creditcardid <> None)
+        }
+        |> toSql
+    sql.Contains("IS NOT NULL") =! true
+
+[<Test>]
+let ``Where with Option Type After Left Join``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin d in sales.salesorderdetail on (o.salesorderid = d.Value.salesorderid)
+            where (o.creditcardid <> None)
+        }
+        |> toSql
+    sql.Contains("IS NOT NULL") =! true
+
+[<Test>]
+let ``Where with Option Type on Joined Table Column``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            where (d.carriertrackingnumber <> None)
+        }
+        |> toSql
+    sql.Contains("IS NOT NULL") =! true
+
+[<Test>]
+let ``Where with Option Type on Left Joined Table Column``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin d in sales.salesorderdetail on (o.salesorderid = d.Value.salesorderid)
+            where (d.Value.carriertrackingnumber <> None)
+        }
+        |> toSql
+    sql.Contains("IS NOT NULL") =! true
+
+[<Test>]
+let ``Where Not Like``() =
     let sql = 
         select {
             for a in person.address do
