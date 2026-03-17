@@ -145,6 +145,14 @@ let setup () = task {
     cmd.ExecuteNonQuery() |> ignore
 }
 
+// Helper to insert test data via raw SQL
+let private execSql (shared: QueryContext) (sql: string) = task {
+    use cmd = shared.Connection.CreateCommand()
+    cmd.Transaction <- shared.Transaction |> Option.defaultValue null
+    cmd.CommandText <- sql
+    cmd.ExecuteNonQuery() |> ignore
+}
+
 // Placeholder test to verify setup works
 [<Test>]
 let ``Setup - test tables exist``() = task {
@@ -154,4 +162,65 @@ let ``Setup - test tables exist``() = task {
     cmd.Transaction <- shared.Transaction |> Option.defaultValue null
     let! count = cmd.ExecuteScalarAsync()
     Assert.AreEqual(1L, count)
+}
+
+// ============================================================
+// Bug 1: join on (optionalCol = Some nonNullCol)
+// ============================================================
+
+[<Test>]
+let ``Bug1: join on Option column = Some non-nullable PK``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId = Guid.NewGuid()
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Test Source')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{emailId}', '{sourceId}', 'test@test.com')"
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            join s in ``public``.test_sources on (e.source_id = Some s.id)
+            select (e.id, s.name)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "Expected 1 joined result")
+    let (eid, sname) = resultList.[0]
+    Assert.AreEqual(emailId, eid)
+    Assert.AreEqual("Test Source", sname)
+
+    shared.RollbackTransaction()
+}
+
+// NOTE: Reversed form `(Some s.id = e.source_id)` is not valid in CE join syntax
+// because s (inner) is not available in the outer key selector position.
+// The outer key must reference the outer source and the inner key must reference the inner source.
+
+[<Test>]
+let ``Bug1: join with Some and additional WHERE conditions``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId = Guid.NewGuid()
+    let verifiedAt = DateTime.UtcNow.ToString("o")
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name, verified_at) VALUES ('{sourceId}', 'Verified Source', '{verifiedAt}')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, source_id, sender, status) VALUES ('{emailId}', '{sourceId}', 'test@test.com', 'stored')"
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            join s in ``public``.test_sources on (e.source_id = Some s.id)
+            where (e.status = "stored" && s.verified_at <> None)
+            select e
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "Expected 1 result with WHERE conditions")
+
+    shared.RollbackTransaction()
 }
