@@ -842,3 +842,21 @@ let ``leftJoin' semi-join where d <> None``() = task {
 
     gt0 productsWithSubcategory
 }
+
+[<Test>]
+let ``leftJoin' on' with compound predicate and captured variable``() = task {
+    let minOrderQty = 5s
+    let! results =
+        selectTask db {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail
+            on' (o.salesorderid = d.Value.salesorderid && d.Value.orderqty > minOrderQty)
+            select (o.salesorderid, d)
+            take 20
+        }
+
+    gt0 results
+    // LEFT JOIN should always return rows; some may have d = None
+    let hasSome = results |> Seq.exists (fun (_, d) -> d.IsSome)
+    Assert.IsTrue(hasSome, "Expected at least some matched rows with orderqty > 5")
+}
