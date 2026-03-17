@@ -812,3 +812,33 @@ let ``Insert with Returning``() = task {
 
     shared.RollbackTransaction()
 }
+
+[<Test>]
+let ``leftJoin' anti-join where d = None``() = task {
+    let! productsWithoutSubcategory =
+        selectTask db {
+            for p in production.product do
+            leftJoin' sc in production.productsubcategory
+            on' (p.productsubcategoryid = Some sc.Value.productsubcategoryid)
+            where (sc = None)
+            select p.name
+            take 10
+        }
+
+    gt0 productsWithoutSubcategory
+}
+
+[<Test>]
+let ``leftJoin' semi-join where d <> None``() = task {
+    let! productsWithSubcategory =
+        selectTask db {
+            for p in production.product do
+            leftJoin' sc in production.productsubcategory
+            on' (p.productsubcategoryid = Some sc.Value.productsubcategoryid)
+            where (sc <> None)
+            select p.name
+            take 10
+        }
+
+    gt0 productsWithSubcategory
+}
