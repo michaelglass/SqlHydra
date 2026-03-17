@@ -993,3 +993,23 @@ let ``Insert onConflictDoUpdateCoalesce preserves existing value``() = task {
 
     shared.RollbackTransaction()
 }
+
+[<Test>]
+let ``Select with DISTINCT ON``() = task {
+    // Get one order per customer, ordered by most recent order date
+    let! results =
+        selectTask db {
+            for o in sales.salesorderheader do
+            distinctOn o.customerid
+            orderBy o.customerid
+            thenByDescending o.orderdate
+            select (o.customerid, o.salesorderid, o.orderdate)
+            take 20
+        }
+
+    gt0 results
+    // Verify uniqueness: each customerid should appear exactly once
+    let customerIds = results |> Seq.map (fun (cid, _, _) -> cid) |> Seq.toList
+    let uniqueCustomerIds = customerIds |> List.distinct
+    Assert.AreEqual(customerIds.Length, uniqueCustomerIds.Length, "DISTINCT ON should return one row per customer")
+}
