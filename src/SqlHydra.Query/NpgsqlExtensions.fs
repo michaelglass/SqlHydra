@@ -81,11 +81,31 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
 
     /// Insert is ignored if a conflict occurs.
     [<CustomOperation("onConflictDoNothing", MaintainsVariableSpace = true)>]
-    member this.OnConflictDoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, 
-        [<ProjectionParameter>] conflictFields) = 
-        
+    member this.OnConflictDoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFields) =
+
         let spec = state.Query
         let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun tblAlias p -> p.Name)
         let newSpec = { spec with InsertType = OnConflictDoNothing conflictFields }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+    /// Returns specified columns from the inserted row (PostgreSQL RETURNING clause).
+    [<CustomOperation("returning", MaintainsVariableSpace = true)>]
+    member this.Returning (state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, [<ProjectionParameter>] selectExpression) =
+        let spec = state.Query
+        let selections = LinqExpressionVisitors.visitSelect<'T,'InsertReturn> selectExpression
+        let newSpec =
+            selections
+            |> List.choose (function
+                | LinqExpressionVisitors.SelectedColumn (tableAlias, column, columnType, isOpt, isNullable) ->
+                    Some (tableAlias, column, columnType, isOpt, isNullable)
+                | _ ->
+                    None
+            )
+            |> List.fold (fun (spec: InsertQuerySpec<'T, 'InsertReturn>) (_, column, propertyType, isOptional, isNullable) ->
+                let nullability = if isOptional then IsOptional elif isNullable then IsNullable else NotNullable
+                let outputField = { ColumnName = column; PropertyType = propertyType; Nullability = nullability }
+                { spec with OutputFields = spec.OutputFields @ [outputField ] }
+            ) spec
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
 

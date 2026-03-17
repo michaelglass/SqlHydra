@@ -321,8 +321,16 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             // Try apply on conflict
             cmd.CommandText <- cmd.CommandText |> applyOnConflict
 
-            // Append SQL Server output clause
-            cmd.CommandText <- OutputClause.inserted outputFields cmd.CommandText
+            if provider = Npgsql then
+                // Append PostgreSQL RETURNING clause
+                let returningCsv =
+                    outputFields
+                    |> List.map (fun f -> $"\"{f.ColumnName}\"")
+                    |> String.concat ", "
+                cmd.CommandText <- cmd.CommandText.TrimEnd(';') + $" RETURNING {returningCsv};"
+            else
+                // Append SQL Server output clause
+                cmd.CommandText <- OutputClause.inserted outputFields cmd.CommandText
 
             // Fix Oracle multi-insert query
             if provider = Oracle && iq.Spec.Entities.Length > 1

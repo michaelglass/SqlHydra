@@ -2,6 +2,7 @@
 
 open Swensen.Unquote
 open SqlHydra.Query
+open SqlHydra.Query.NpgsqlExtensions
 open NUnit.Framework
 open DB
 #if NET8_0
@@ -478,3 +479,24 @@ let ``Inline Aggregates``() =
         |> toSql
 
     sql =! "SELECT COUNT(\"o\".\"salesorderid\") AS __hydra_expr_0 FROM \"sales\".\"salesorderheader\" AS \"o\"".RemoveHydraExpr()
+
+[<Test>]
+let ``Insert with Returning``() =
+    let query =
+        insert {
+            for c in sales.customer do
+            entity
+                {
+                    sales.customer.modifieddate = System.DateTime.Today
+                    sales.customer.territoryid = None
+                    sales.customer.storeid = None
+                    sales.customer.personid = Some 1
+                    sales.customer.rowguid = System.Guid.NewGuid()
+                    sales.customer.customerid = 0
+                }
+            returning (c.customerid, c.rowguid)
+        }
+
+    Assert.AreEqual(2, query.Spec.OutputFields.Length, "Expected 2 output fields")
+    Assert.AreEqual("customerid", query.Spec.OutputFields.[0].ColumnName)
+    Assert.AreEqual("rowguid", query.Spec.OutputFields.[1].ColumnName)

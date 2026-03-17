@@ -785,3 +785,30 @@ let ``SqlFn - PostgreSQL functions smoke test``() = task {
     upperName =! "KEN"
     Assert.That(middleName, Is.Not.Null)
 }
+
+[<Test>]
+let ``Insert with Returning``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let currencyCode = "ZZZ"
+    let currencyName = "RETURNING Test Currency"
+    let modifiedDate = System.DateTime.Today
+
+    let! (returnedCode: string, returnedName: string) =
+        insertTask shared {
+            for c in sales.currency do
+            entity
+                {
+                    sales.currency.currencycode = currencyCode
+                    sales.currency.name = currencyName
+                    sales.currency.modifieddate = modifiedDate
+                }
+            returning (c.currencycode, c.name)
+        }
+
+    Assert.AreEqual(currencyCode, returnedCode, "Expected returned currency code to match")
+    Assert.AreEqual(currencyName, returnedName, "Expected returned currency name to match")
+
+    shared.RollbackTransaction()
+}
