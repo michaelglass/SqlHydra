@@ -54,3 +54,4 @@ Desktop.ini
 **/Verify/*.received.*
 plan.md
 .worktrees/
+TestResults/
