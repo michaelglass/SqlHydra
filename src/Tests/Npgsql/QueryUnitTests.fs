@@ -3,6 +3,7 @@
 open Swensen.Unquote
 open SqlHydra.Query
 open SqlHydra.Query.NpgsqlExtensions
+open type SqlFn
 open NUnit.Framework
 open DB
 #if NET8_0
@@ -523,3 +524,27 @@ let ``Insert OnConflictDoNothing with Where``() =
         Assert.AreEqual(["personid"], fields)
         Assert.AreEqual("personid IS NOT NULL", whereClause)
     | _ -> Assert.Fail("Expected OnConflictDoNothingWhere")
+
+[<Test>]
+let ``Where with Coalesce``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (coalesce(o.creditcardid, 0) = 123)
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("coalesce") =! true
+
+[<Test>]
+let ``Where with Coalesce compared to value``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (coalesce(o.salespersonid, 0) <> 0)
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("coalesce") =! true
