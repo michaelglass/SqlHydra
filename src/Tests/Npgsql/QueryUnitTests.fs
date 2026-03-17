@@ -812,3 +812,64 @@ let ``onConflictDoUpdateCoalesce generates COALESCE SQL``() =
     printfn "SQL: %s" sql
     sql.Contains("COALESCE") =! true
     sql.Contains("EXCLUDED") =! true
+
+[<Test>]
+let ``CTE with anonymous record``() =
+    let innerQuery =
+        select {
+            for a in person.address do
+            select {| City = a.city; Id = a.addressid |}
+        }
+
+    let sql =
+        select {
+            for r in cte "my_cte" innerQuery do
+            where (r.Id > 5)
+            select r.City
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("my_cte") =! true
+    sql.Contains("\"r\".\"Id\"") =! true
+
+[<Test>]
+let ``CTE select all columns``() =
+    let innerQuery =
+        select {
+            for a in person.address do
+            select {| City = a.city; Id = a.addressid |}
+        }
+
+    let sql =
+        select {
+            for r in cte "addr_cte" innerQuery do
+            select r
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("addr_cte") =! true
+
+[<Test>]
+let ``CTE with where on multiple columns``() =
+    let innerQuery =
+        select {
+            for o in sales.salesorderheader do
+            where (o.onlineorderflag)
+            select {| CustomerId = o.customerid; OrderDate = o.orderdate; Total = o.totaldue |}
+        }
+
+    let sql =
+        select {
+            for s in cte "online_orders" innerQuery do
+            where (s.Total > Some 100m && s.CustomerId > 0)
+            orderByDescending s.Total
+            select s
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("online_orders") =! true
+    sql.Contains("\"s\".\"Total\"") =! true
+    sql.Contains("\"s\".\"CustomerId\"") =! true

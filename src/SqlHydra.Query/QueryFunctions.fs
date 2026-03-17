@@ -4,9 +4,16 @@
 module Table = 
 
     /// Maps the entity 'T to a table of the exact same name.
-    let table<'T> = 
+    let table<'T> =
         let ent = typeof<'T>
-        let tables = Map [Root, { Name = ent.Name; Schema = ent.DeclaringType.Name}]
+        let tables = Map [Root, { Name = ent.Name; Schema = ent.DeclaringType.Name; RecordType = None }]
+        QuerySource<'T>(tables)
+
+    /// Creates a CTE (Common Table Expression) source from a select query.
+    /// Use with anonymous records for named column access without boilerplate types.
+    let cte<'T> (alias: string) (innerQuery: SelectQuery<'T>) : QuerySource<'T> =
+        let tables = Map [Root, { Name = alias; Schema = ""; RecordType = Some typeof<'T> }]
+        CteQueryStore.set alias (innerQuery.ToKataQuery())
         QuerySource<'T>(tables)
 
     /// Maps the entity 'T to a schema of the given name.

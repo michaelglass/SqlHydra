@@ -119,9 +119,14 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let tblMaybe, tableMappings = TableMappings.tryGetByRootOrAlias tableAlias state.TableMappings
 
         match tblMaybe with
-        | Some tbl -> 
+        | Some tbl when tbl.IsCte ->
+            let q = query.From($"{tbl.Name} as {tableAlias}")
+            match CteQueryStore.tryTake tbl.Name with
+            | Some cteQuery -> QuerySource<'T, Query>(q.With(tbl.Name, cteQuery), tableMappings)
+            | None -> QuerySource<'T, Query>(q, tableMappings)
+        | Some tbl ->
             QuerySource<'T, Query>(query.From($"{tbl.Schema}.{tbl.Name} as {tableAlias}"), tableMappings)
-        | None -> 
+        | None ->
             // Handles this scenario: `select (p.FirstName, p.LastName) into (fname, lname)`
             state :?> QuerySource<'T, Query>
 
