@@ -319,3 +319,180 @@ let ``Bug1: join with Some and additional WHERE conditions``() = task {
 
     shared.RollbackTransaction()
 }
+
+// ============================================================
+// Regression tests: patterns that work and must keep working
+// ============================================================
+
+[<Test>]
+let ``Regression: <> None on Option column (IS NOT NULL)``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId1 = Guid.NewGuid()
+    let emailId2 = Guid.NewGuid()
+    let verifiedAt = DateTime.UtcNow.ToString("o")
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Source')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, source_id, sender, verified_at) VALUES ('{emailId1}', '{sourceId}', 'a@test.com', '{verifiedAt}')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, sender) VALUES ('{emailId2}', 'b@test.com')"
+
+    let! withVerified =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            where (e.verified_at <> None)
+            select e.id
+        }
+    Assert.IsTrue(withVerified |> Seq.contains emailId1, "Should find email with verified_at")
+    Assert.IsFalse(withVerified |> Seq.contains emailId2, "Should not find email without verified_at")
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Regression: = None on Option column (IS NULL)``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId1 = Guid.NewGuid()
+    let emailId2 = Guid.NewGuid()
+    let verifiedAt = DateTime.UtcNow.ToString("o")
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Source')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, source_id, sender, verified_at) VALUES ('{emailId1}', '{sourceId}', 'a@test.com', '{verifiedAt}')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, sender) VALUES ('{emailId2}', 'b@test.com')"
+
+    let! withoutVerified =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            where (e.verified_at = None)
+            select e.id
+        }
+    Assert.IsTrue(withoutVerified |> Seq.contains emailId2, "Should find email without verified_at")
+    Assert.IsFalse(withoutVerified |> Seq.contains emailId1, "Should not find email with verified_at")
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Regression: = None on leftJoin' binding (anti-join)``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId1 = Guid.NewGuid()
+    let emailId2 = Guid.NewGuid()
+    let articleId = Guid.NewGuid()
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Source')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{emailId1}', '{sourceId}', 'a@test.com')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{emailId2}', '{sourceId}', 'b@test.com')"
+    do! execSql shared $"INSERT INTO public.test_articles (id, email_id, title) VALUES ('{articleId}', '{emailId1}', 'Article')"
+
+    // Anti-join: emails without articles
+    let! emailsWithoutArticles =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            leftJoin' a in ``public``.test_articles
+            on' (a.Value.email_id = e.id)
+            where (a = None)
+            select e.id
+        }
+
+    Assert.IsTrue(emailsWithoutArticles |> Seq.contains emailId2, "Email without article should be in anti-join result")
+    Assert.IsFalse(emailsWithoutArticles |> Seq.contains emailId1, "Email with article should NOT be in anti-join result")
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Regression: single-condition on' with .Value``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let prefId = Guid.NewGuid()
+    let userId = Guid.NewGuid()
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Source')"
+    do! execSql shared $"INSERT INTO public.test_preferences (id, source_id, user_id) VALUES ('{prefId}', '{sourceId}', '{userId}')"
+
+    let! results =
+        selectTask shared {
+            for s in ``public``.test_sources do
+            leftJoin' p in ``public``.test_preferences
+            on' (p.Value.source_id = s.id)
+            select (s.id, p)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length)
+    Assert.IsTrue((snd resultList.[0]).IsSome, "Expected matched preference")
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Regression: =% ILIKE operator``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let emailId = Guid.NewGuid()
+
+    do! execSql shared $"INSERT INTO public.test_emails (id, sender) VALUES ('{emailId}', 'alice@example.com')"
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            where (e.sender =% "%alice%")
+            select e.id
+        }
+
+    Assert.IsTrue(results |> Seq.contains emailId, "ILIKE should match 'alice'")
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Regression: onConflictDoNothingWhere with returning``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let userId = Guid.NewGuid()
+    let eventId = Guid.NewGuid()
+
+    let event1 = {
+        ``public``.test_events.id = eventId
+        ``public``.test_events.email_event_id = Some "evt-123"
+        ``public``.test_events.user_id = userId
+        ``public``.test_events.event_type = "open"
+        ``public``.test_events.created_at = DateTime.UtcNow
+    }
+
+    // First insert should succeed and return the id
+    let! (returnedId: Guid) =
+        insertTask shared {
+            for e in ``public``.test_events do
+            entity event1
+            onConflictDoNothingWhere e.email_event_id "email_event_id IS NOT NULL"
+            returning e.id
+        }
+
+    Assert.AreEqual(eventId, returnedId, "First insert should return the id")
+
+    // Second insert with same email_event_id should be ignored
+    let event2 = { event1 with id = Guid.NewGuid() }
+    let! (returnedId2: Guid) =
+        insertTask shared {
+            for e in ``public``.test_events do
+            entity event2
+            onConflictDoNothingWhere e.email_event_id "email_event_id IS NOT NULL"
+            returning e.id
+        }
+
+    Assert.AreEqual(Guid.Empty, returnedId2, "Conflicting insert should return default (empty) guid")
+
+    shared.RollbackTransaction()
+}
