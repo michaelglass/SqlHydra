@@ -22,6 +22,9 @@
     <DefineConstants>TRACE;</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Npgsql/GeneratedTestTypes.fs">
+      <Visible>False</Visible>
+    </Compile>
     <Compile Include="Util.fs" />
     <Compile Include="Sqlite\AdventureWorksNet8.fs" Condition="'$(TargetFramework)' == 'net8.0'" />
     <Compile Include="Sqlite\AdventureWorksNet9.fs" Condition="'$(TargetFramework)' == 'net9.0'" />
@@ -51,6 +54,7 @@
     <Compile Include="Npgsql\QueryUnitTests.fs" />
     <Compile Include="Npgsql\QueryIntegrationTests.fs" />
     <Compile Include="Npgsql\RegressionTests.fs" />
+    <Compile Include="Npgsql\GeneratedTypeRegressionTests.fs" />
     <Compile Include="Npgsql\Generation.fs" />
     <Compile Include="Oracle\AdventureWorksNet8.fs" Condition="'$(TargetFramework)' == 'net8.0'" />
     <Compile Include="Oracle\AdventureWorksNet9.fs" Condition="'$(TargetFramework)' == 'net9.0'" />
