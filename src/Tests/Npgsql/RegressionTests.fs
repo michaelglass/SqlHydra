@@ -195,6 +195,101 @@ let ``Bug1: join on Option column = Some non-nullable PK``() = task {
     shared.RollbackTransaction()
 }
 
+// ============================================================
+// Bug 2: Compound && in on' with .Value access
+// ============================================================
+
+[<Test>]
+let ``Bug2: leftJoin' on' with compound AND and .Value access``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let userId = Guid.NewGuid()
+    let prefId = Guid.NewGuid()
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Test Source')"
+    do! execSql shared $"INSERT INTO public.test_preferences (id, source_id, user_id, priority) VALUES ('{prefId}', '{sourceId}', '{userId}', 10)"
+
+    let! results =
+        selectTask shared {
+            for s in ``public``.test_sources do
+            leftJoin' p in ``public``.test_preferences
+            on' (p.Value.source_id = s.id && p.Value.user_id = userId)
+            select (s.id, p)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "Expected 1 result")
+    let (sid, pref) = resultList.[0]
+    Assert.AreEqual(sourceId, sid)
+    Assert.IsTrue(pref.IsSome, "Expected matched preference")
+    Assert.AreEqual(10, pref.Value.priority)
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Bug2: leftJoin' on' compound AND where second condition doesn't match``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let userId = Guid.NewGuid()
+    let otherUserId = Guid.NewGuid()
+    let prefId = Guid.NewGuid()
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Test Source')"
+    do! execSql shared $"INSERT INTO public.test_preferences (id, source_id, user_id, priority) VALUES ('{prefId}', '{sourceId}', '{otherUserId}', 5)"
+
+    // Join with userId that doesn't match the preference's user_id
+    let! results =
+        selectTask shared {
+            for s in ``public``.test_sources do
+            leftJoin' p in ``public``.test_preferences
+            on' (p.Value.source_id = s.id && p.Value.user_id = userId)
+            select (s.id, p)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "Expected 1 result (source exists)")
+    let (sid, pref) = resultList.[0]
+    Assert.AreEqual(sourceId, sid)
+    Assert.IsTrue(pref.IsNone, "Expected no matched preference for different user")
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Bug2: leftJoin' on' with compound AND on non-option columns``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let emailId = Guid.NewGuid()
+    let sourceId = Guid.NewGuid()
+    let articleId = Guid.NewGuid()
+
+    do! execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Source')"
+    do! execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{emailId}', '{sourceId}', 'test@test.com')"
+    do! execSql shared $"INSERT INTO public.test_articles (id, email_id, title) VALUES ('{articleId}', '{emailId}', 'specific')"
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            leftJoin' a in ``public``.test_articles
+            on' (a.Value.email_id = e.id && a.Value.title = "specific")
+            select (e.id, a)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "Expected 1 result")
+    let (eid, article) = resultList.[0]
+    Assert.AreEqual(emailId, eid)
+    Assert.IsTrue(article.IsSome, "Expected matched article")
+
+    shared.RollbackTransaction()
+}
+
 // NOTE: Reversed form `(Some s.id = e.source_id)` is not valid in CE join syntax
 // because s (inner) is not available in the outer key selector position.
 // The outer key must reference the outer source and the inner key must reference the inner source.
