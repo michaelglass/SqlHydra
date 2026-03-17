@@ -610,23 +610,31 @@ let ``REGRESSION: leftJoin' with on' predicate-style join - production pattern C
 
 [<Test>]
 let ``REGRESSION: leftJoin' with anti-join where None - production pattern C variant``() =
-    // KNOWN BUG: This throws NotImplementedException in LinqExpressionVisitors.fs:line 660
-    // Production pattern: leftJoin' + where (d = None) for anti-join
-    try
-        let sql =
-            select {
-                for o in sales.salesorderheader do
-                leftJoin' d in sales.salesorderdetail; on' (o.salesorderid = d.Value.salesorderid)
-                where (d = None)
-                select o
-            }
-            |> toSql
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (o.salesorderid = d.Value.salesorderid)
+            where (d = None)
+            select o
+        }
+        |> toSql
 
-        printfn "SQL: %s" sql
-        sql.Contains("IS NULL") =! true
-    with
-    | :? System.NotImplementedException ->
-        Assert.Pass("KNOWN BUG: leftJoin' anti-join (where d = None) throws NotImplementedException")
+    printfn "SQL: %s" sql
+    sql.Contains("IS NULL") =! true
+
+[<Test>]
+let ``REGRESSION: leftJoin' with where d <> None - semi-join pattern``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (o.salesorderid = d.Value.salesorderid)
+            where (d <> None)
+            select o
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("IS NOT NULL") =! true
 
 [<Test>]
 let ``REGRESSION: =% ILIKE with percent pattern - production pattern D``() =

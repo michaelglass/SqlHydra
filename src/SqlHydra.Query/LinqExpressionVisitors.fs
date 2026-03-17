@@ -763,6 +763,25 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 let sqlFragment2 = nVisitSqlFn qualifyColumn right
                 query.WhereRaw($"{sqlFragment1} {comparison} {sqlFragment2}")
 
+            // Anti-join pattern: `where (d = None)` or `where (d <> None)` on a left-joined table parameter
+            // F# compiles `None` as a method call (FSharpOption.get_None()), not as Constant null
+            | Parameter p, _ | _, Parameter p when
+                p.Type |> isOptionType ->
+                let otherSide = if (x.Left :> Expression).NodeType = ExpressionType.Parameter then x.Right else x.Left
+                let evaluatedValue = compileAndEvaluateExpression otherSide
+                match evaluatedValue with
+                | null ->
+                    // Get the inner record type from Option<T>
+                    let innerType = p.Type.GetGenericArguments().[0]
+                    // Get the first record field to use for the IS NULL / IS NOT NULL check
+                    let firstField = FSharp.Reflection.FSharpType.GetRecordFields(innerType).[0]
+                    let fqCol = qualifyColumn p.Name (firstField :> MemberInfo)
+                    match exp.NodeType with
+                    | ExpressionType.Equal -> query.WhereNull(fqCol)
+                    | ExpressionType.NotEqual -> query.WhereNotNull(fqCol)
+                    | _ -> notImplMsg "Unsupported comparison on left-joined table parameter"
+                | _ -> notImplMsg "Left-joined table parameter can only be compared to None"
+
             | NValue _, NValue _ ->
                 notImplMsg("Value to value comparisons are not currently supported. Ex: where (1 = 1)")
             | _ ->
