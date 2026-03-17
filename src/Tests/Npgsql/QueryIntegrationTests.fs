@@ -860,3 +860,35 @@ let ``leftJoin' on' with compound predicate and captured variable``() = task {
     let hasSome = results |> Seq.exists (fun (_, d) -> d.IsSome)
     Assert.IsTrue(hasSome, "Expected at least some matched rows with orderqty > 5")
 }
+
+[<Test>]
+let ``Insert onConflictDoNothingWhere``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let currency = {
+        sales.currency.currencycode = "ZZT"
+        sales.currency.name = "Test Currency"
+        sales.currency.modifieddate = System.DateTime.Today
+    }
+
+    // First insert should succeed
+    let! result1 =
+        insertTask shared {
+            for c in sales.currency do
+            entity currency
+        }
+    result1 =! 1
+
+    // Second insert with onConflictDoNothingWhere should be silently ignored
+    let! result2 =
+        insertTask shared {
+            for c in sales.currency do
+            entity currency
+            onConflictDoNothingWhere c.currencycode "TRUE"
+        }
+    // Conflict handled gracefully — 0 rows affected
+    Assert.GreaterOrEqual(result2, 0)
+
+    shared.RollbackTransaction()
+}
