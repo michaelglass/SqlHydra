@@ -84,6 +84,7 @@ type InsertType =
     | InsertOrReplace
     | OnConflictDoUpdate of conflictFields: string list * updateFields: string list
     | OnConflictDoNothing of conflictFields: string list
+    | OnConflictDoNothingWhere of conflictFields: string list * whereClause: string
     | InsertOrUpdateOnUnique of keyFields: string list * updateFields: string list
 
 type InsertQuerySpec<'T, 'Identity> =
@@ -278,6 +279,7 @@ module internal KataUtils =
         match spec.IdentityField, spec.InsertType with
         | Some ident, OnConflictDoUpdate (conflictFields, _)
         | Some ident, OnConflictDoNothing conflictFields
+        | Some ident, OnConflictDoNothingWhere (conflictFields, _)
         | Some ident, InsertOrUpdateOnUnique (conflictFields, _) ->
             if conflictFields |> List.contains ident
             then failwith $"Using identity column as a conflict target is not supported."

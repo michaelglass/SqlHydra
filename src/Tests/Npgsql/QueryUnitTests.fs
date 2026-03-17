@@ -500,3 +500,26 @@ let ``Insert with Returning``() =
     Assert.AreEqual(2, query.Spec.OutputFields.Length, "Expected 2 output fields")
     Assert.AreEqual("customerid", query.Spec.OutputFields.[0].ColumnName)
     Assert.AreEqual("rowguid", query.Spec.OutputFields.[1].ColumnName)
+
+[<Test>]
+let ``Insert OnConflictDoNothing with Where``() =
+    let query =
+        insert {
+            for c in sales.customer do
+            entity
+                {
+                    sales.customer.modifieddate = System.DateTime.Today
+                    sales.customer.territoryid = None
+                    sales.customer.storeid = None
+                    sales.customer.personid = Some 1
+                    sales.customer.rowguid = System.Guid.NewGuid()
+                    sales.customer.customerid = 0
+                }
+            onConflictDoNothingWhere c.personid "personid IS NOT NULL"
+        }
+
+    match query.Spec.InsertType with
+    | OnConflictDoNothingWhere (fields, whereClause) ->
+        Assert.AreEqual(["personid"], fields)
+        Assert.AreEqual("personid IS NOT NULL", whereClause)
+    | _ -> Assert.Fail("Expected OnConflictDoNothingWhere")

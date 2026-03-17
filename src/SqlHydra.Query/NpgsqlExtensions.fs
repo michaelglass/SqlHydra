@@ -89,6 +89,17 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
         let newSpec = { spec with InsertType = OnConflictDoNothing conflictFields }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
 
+    /// Insert is ignored if a conflict occurs, with a WHERE clause for partial index targeting.
+    [<CustomOperation("onConflictDoNothingWhere", MaintainsVariableSpace = true)>]
+    member this.OnConflictDoNothingWhere(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFields,
+        whereClause: string) =
+
+        let spec = state.Query
+        let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun tblAlias p -> p.Name)
+        let newSpec = { spec with InsertType = OnConflictDoNothingWhere (conflictFields, whereClause) }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
     /// Returns specified columns from the inserted row (PostgreSQL RETURNING clause).
     [<CustomOperation("returning", MaintainsVariableSpace = true)>]
     member this.Returning (state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, [<ProjectionParameter>] selectExpression) =

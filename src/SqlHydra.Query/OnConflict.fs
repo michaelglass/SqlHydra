@@ -33,17 +33,34 @@ let onConflictDoUpdate (conflictColumns: string list) (updateColumns: string lis
 /// Modifies an insert query to "ON CONFLICT TO NOTHING"
 let onConflictDoNothing (conflictColumns: string list) (cmdText: string) =
     // Separate insert query from optional identity query
-    let insertQuery, identityQuery = 
+    let insertQuery, identityQuery =
         match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
         | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
         | _ -> cmdText, ""
 
-    // Build upsert clause            
+    // Build upsert clause
     let conflictColumnsCsv = String.Join(",", conflictColumns)
-        
+
     Text.StringBuilder()
         .AppendLine(insertQuery)
         .AppendLine($"ON CONFLICT({conflictColumnsCsv})")
+        .AppendLine("DO NOTHING;")
+        .AppendLine(identityQuery)
+        .ToString()
+
+/// Modifies an insert query to "ON CONFLICT ... WHERE ... DO NOTHING"
+let onConflictDoNothingWhere (conflictColumns: string list) (whereClause: string) (cmdText: string) =
+    // Separate insert query from optional identity query
+    let insertQuery, identityQuery =
+        match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
+        | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
+        | _ -> cmdText, ""
+
+    let conflictColumnsCsv = String.Join(",", conflictColumns)
+
+    Text.StringBuilder()
+        .AppendLine(insertQuery)
+        .AppendLine($"ON CONFLICT({conflictColumnsCsv}) WHERE {whereClause}")
         .AppendLine("DO NOTHING;")
         .AppendLine(identityQuery)
         .ToString()

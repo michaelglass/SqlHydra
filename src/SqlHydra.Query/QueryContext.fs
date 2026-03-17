@@ -284,6 +284,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             | InsertOrReplace -> OnConflict.insertOrReplace
             | OnConflictDoUpdate (conflictFields, updateFields) -> OnConflict.onConflictDoUpdate conflictFields updateFields
             | OnConflictDoNothing conflictFields -> OnConflict.onConflictDoNothing conflictFields
+            | OnConflictDoNothingWhere (conflictFields, whereClause) -> OnConflict.onConflictDoNothingWhere conflictFields whereClause
             | Insert -> id
             | InsertOrUpdateOnUnique _ -> id // handled above
 
