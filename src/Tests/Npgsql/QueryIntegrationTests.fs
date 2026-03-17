@@ -892,3 +892,60 @@ let ``Insert onConflictDoNothingWhere``() = task {
 
     shared.RollbackTransaction()
 }
+
+[<Test>]
+let ``Insert with Returning single column``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let! (returnedCode: string) =
+        insertTask shared {
+            for c in sales.currency do
+            entity
+                {
+                    sales.currency.currencycode = "ZZS"
+                    sales.currency.name = "Single Return Test"
+                    sales.currency.modifieddate = System.DateTime.Today
+                }
+            returning c.currencycode
+        }
+
+    Assert.AreEqual("ZZS", returnedCode)
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Insert with Returning after onConflictDoNothing``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let currency = {
+        sales.currency.currencycode = "ZZR"
+        sales.currency.name = "Returning Conflict Test"
+        sales.currency.modifieddate = System.DateTime.Today
+    }
+
+    // First insert — should return the code
+    let! (returnedCode1: string) =
+        insertTask shared {
+            for c in sales.currency do
+            entity currency
+            returning c.currencycode
+        }
+    Assert.AreEqual("ZZR", returnedCode1)
+
+    // Second insert with conflict — RETURNING with DO NOTHING returns 0 rows
+    // The OutputClause.readValues should handle this gracefully
+    let! (returnedCode2: string) =
+        insertTask shared {
+            for c in sales.currency do
+            entity currency
+            onConflictDoNothing c.currencycode
+            returning c.currencycode
+        }
+    // On conflict with DO NOTHING, no row is returned — expect default value (null for string)
+    Assert.IsNull(returnedCode2, "Expected null/default when conflict is ignored")
+
+    shared.RollbackTransaction()
+}

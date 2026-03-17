@@ -336,7 +336,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                     outputFields
                     |> List.map (fun f -> $"\"{f.ColumnName}\"")
                     |> String.concat ", "
-                cmd.CommandText <- cmd.CommandText.TrimEnd(';') + $" RETURNING {returningCsv};"
+                cmd.CommandText <- cmd.CommandText.TrimEnd([|';'; ' '; '\n'; '\r'|]) + $" RETURNING {returningCsv};"
             else
                 // Append SQL Server output clause
                 cmd.CommandText <- OutputClause.inserted outputFields cmd.CommandText
