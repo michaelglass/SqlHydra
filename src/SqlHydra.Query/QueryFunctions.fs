@@ -113,3 +113,8 @@ module SqlFunctions =
     ///   let LEN (s: string) : int = sqlFn
     ///   let SUBSTRING (s: string, start: int, length: int) : string = sqlFn
     let sqlFn<'Return> : 'Return = Unchecked.defaultof<'Return>
+
+[<AutoOpen>]
+module CaseWhenFunctions =
+    /// CASE WHEN condition THEN thenValue ELSE elseValue END
+    let caseWhen<'T> (condition: bool) (thenValue: 'T) (elseValue: 'T) : 'T = Unchecked.defaultof<'T>

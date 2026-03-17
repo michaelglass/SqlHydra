@@ -873,3 +873,30 @@ let ``CTE with where on multiple columns``() =
     sql.Contains("online_orders") =! true
     sql.Contains("\"s\".\"Total\"") =! true
     sql.Contains("\"s\".\"CustomerId\"") =! true
+
+[<Test>]
+let ``CASE WHEN in select with bool column``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select (o.customerid, caseWhen (o.onlineorderflag = true) "Online" "InStore")
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("CASE WHEN") =! true
+    sql.Contains("THEN") =! true
+    sql.Contains("ELSE") =! true
+    sql.Contains("END") =! true
+
+[<Test>]
+let ``CASE WHEN in select with comparison``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select (o.customerid, caseWhen (o.totaldue > Some 100m) "High" "Low")
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("CASE WHEN") =! true
