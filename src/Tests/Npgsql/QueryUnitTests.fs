@@ -661,6 +661,32 @@ let ``REGRESSION: =% ILIKE on Option string column - production pattern D varian
     sql.Contains("ilike") =! true
 
 [<Test>]
+let ``OrderBy NULLS LAST``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            orderByNullsLast o.creditcardid
+            select o
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("NULLS LAST") =! true
+
+[<Test>]
+let ``OrderByDescending NULLS FIRST``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            orderByDescNullsFirst o.creditcardid
+            select o
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("NULLS FIRST") =! true
+
+[<Test>]
 let ``REGRESSION: leftJoin' on' with compound predicate and external value``() =
     let minDiscount = 0m
     let sql =

@@ -1,6 +1,7 @@
 ﻿module SqlHydra.Query.NpgsqlExtensions
 
 open System
+open SqlKata
 
 /// Common PostgreSQL functions for use in select expressions.
 /// Use `open type SqlFn` to access functions without qualification.
@@ -119,4 +120,33 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
                 { spec with OutputFields = spec.OutputFields @ [outputField ] }
             ) spec
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+/// PostgreSQL-specific extensions for the select builder.
+type SelectBuilder<'Selected, 'Mapped> with
+
+    /// ORDER BY column NULLS LAST
+    [<CustomOperation("orderByNullsLast", MaintainsVariableSpace = true)>]
+    member this.OrderByNullsLast (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
+        let result = LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
+        let orderedQuery =
+            match result with
+            | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
+                let fqCol = $"\"{tableAlias}\".\"{p.Name}\""
+                state.Query.OrderByRaw($"{fqCol} NULLS LAST")
+            | LinqExpressionVisitors.OrderByIgnored -> state.Query
+            | _ -> failwith "NULLS LAST does not support aggregate columns"
+        QuerySource<'T, Query>(orderedQuery, state.TableMappings)
+
+    /// ORDER BY column DESC NULLS FIRST
+    [<CustomOperation("orderByDescNullsFirst", MaintainsVariableSpace = true)>]
+    member this.OrderByDescNullsFirst (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
+        let result = LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
+        let orderedQuery =
+            match result with
+            | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
+                let fqCol = $"\"{tableAlias}\".\"{p.Name}\""
+                state.Query.OrderByRaw($"{fqCol} DESC NULLS FIRST")
+            | LinqExpressionVisitors.OrderByIgnored -> state.Query
+            | _ -> failwith "NULLS FIRST does not support aggregate columns"
+        QuerySource<'T, Query>(orderedQuery, state.TableMappings)
 
