@@ -111,18 +111,19 @@ and Nullability =
     | IsNullable
     | NotNullable
 
-type UpdateQuerySpec<'T, 'UpdateReturn> = 
+type UpdateQuerySpec<'T, 'UpdateReturn> =
     {
         Table: string
         Entity: 'T option
         Fields: string list
         SetValues: (string * obj) list
+        SetRawValues: (string * string * obj array) list
         Where: Query option
         OutputFields: OutputField list
         UpdateAll: bool
     }
-    static member Default : UpdateQuerySpec<'T, 'UpdateReturn> = 
-        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; Where = None; OutputFields = []; UpdateAll = false }
+    static member Default : UpdateQuerySpec<'T, 'UpdateReturn> =
+        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; SetRawValues = []; Where = None; OutputFields = []; UpdateAll = false }
 
 type QuerySource<'T>(tableMappings) =
     interface IEnumerable<'T> with
@@ -169,7 +170,26 @@ module PendingJoins =
             Some pj
         | false, _ -> None
 
-module internal KataUtils = 
+/// Module to store DISTINCT ON column info for PostgreSQL queries.
+module DistinctOnStore =
+    open System.Runtime.CompilerServices
+
+    let private store = ConditionalWeakTable<SqlKata.Query, string list>()
+
+    /// Associates DISTINCT ON columns with a query
+    let set (query: SqlKata.Query) (columns: string list) =
+        store.Remove(query) |> ignore
+        store.Add(query, columns)
+
+    /// Gets and removes DISTINCT ON columns for a query
+    let tryTake (query: SqlKata.Query) =
+        match store.TryGetValue(query) with
+        | true, cols ->
+            store.Remove(query) |> ignore
+            Some cols
+        | false, _ -> None
+
+module internal KataUtils =
 
     // Manually convert DateOnly to DateTime and TimeOnly to TimeSpan (until Microsoft.Data.SqlClient handles)
     let convertIfDateOnlyTimeOnly (value: obj) =
@@ -224,7 +244,11 @@ module internal KataUtils =
                     |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
 
             | Some _, _ -> failwith "Cannot have both `entity` and `set` operations in an `update` expression."
-            | None, [] -> failwith "Either an `entity` or `set` operations must be present in an `update` expression."
+            | None, [] when spec.SetRawValues.Length > 0 ->
+                // setRaw-only update: use first raw value column as placeholder so SqlKata generates valid UPDATE
+                let (col, _, _) = spec.SetRawValues.[0]
+                [| col, box "__SETRAW_PLACEHOLDER__" |]
+            | None, [] -> failwith "Either an `entity`, `set`, or `setRaw` operations must be present in an `update` expression."
             | None, setValues -> setValues |> List.toArray
                     
         let preparedKvps = 

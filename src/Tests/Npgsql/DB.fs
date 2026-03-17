@@ -16,10 +16,19 @@ let connectionString = @"Server=npgsql;Port=5432;Database=Adventureworks;User Id
 let connectionString = @"Server=localhost;Port=54320;Database=Adventureworks;User Id=postgres;Password=postgres;Timeout=3"
 #endif
 
-let toSql (query: SqlHydra.Query.SelectQuery) = 
+let toSql (query: SqlHydra.Query.SelectQuery) =
     let compiler = SqlKata.Compilers.PostgresCompiler()
-    let sql = compiler.Compile(query.ToKataQuery()).Sql
+    let kataQuery = query.ToKataQuery()
+    let compiled = compiler.Compile(kataQuery)
+    // Apply PostgreSQL DISTINCT ON if present
+    match SqlHydra.Query.DistinctOnStore.tryTake kataQuery with
+    | Some columns ->
+        let distinctOnCsv = columns |> String.concat ", "
+        let idx = compiled.Sql.IndexOf("SELECT ")
+        if idx >= 0 then
+            compiled.Sql <- compiled.Sql.Insert(idx + 7, $"DISTINCT ON ({distinctOnCsv}) ")
+    | None -> ()
     #if DEBUG
-    printfn "toSql: %s" sql
+    printfn "toSql: %s" compiled.Sql
     #endif
-    sql
+    compiled.Sql

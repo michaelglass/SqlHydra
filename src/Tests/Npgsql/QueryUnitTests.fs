@@ -687,6 +687,22 @@ let ``OrderByDescending NULLS FIRST``() =
     sql.Contains("NULLS FIRST") =! true
 
 [<Test>]
+let ``DISTINCT ON single column``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            distinctOn o.customerid
+            orderBy o.customerid
+            thenByDescending o.orderdate
+            select o
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("DISTINCT ON") =! true
+    sql.Contains("\"customerid\"") =! true
+
+[<Test>]
 let ``REGRESSION: leftJoin' on' with compound predicate and external value``() =
     let minDiscount = 0m
     let sql =
@@ -701,3 +717,52 @@ let ``REGRESSION: leftJoin' on' with compound predicate and external value``() =
     printfn "SQL: %s" sql
     sql.Contains("LEFT JOIN") =! true
     sql.Contains("AND") =! true
+
+[<Test>]
+let ``Update with setRaw stores raw SET values in spec``() =
+    let query =
+        update {
+            for c in sales.customer do
+            set c.customerid 1
+            setRaw c.personid "COALESCE(?, personid)" [| box (Some 123) |]
+            where (c.customerid = 1)
+        }
+
+    Assert.AreEqual(1, query.Spec.SetRawValues.Length, "Expected 1 raw SET value")
+    let (col, sql, parms) = query.Spec.SetRawValues.[0]
+    Assert.AreEqual("personid", col)
+    Assert.AreEqual("COALESCE(?, personid)", sql)
+    Assert.AreEqual(1, parms.Length)
+
+[<Test>]
+let ``Update with setRaw and set generates correct SQL``() =
+    let sql =
+        update {
+            for c in sales.customer do
+            set c.customerid 1
+            setRaw c.personid "COALESCE(?, personid)" [| box 123 |]
+            where (c.customerid = 1)
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    // The base SQL from SqlKata will have SET "customerid" = @p0
+    // setRaw values are applied post-compilation in QueryContext, not visible in toSql
+    sql.Contains("SET") =! true
+    sql.Contains("\"customerid\"") =! true
+
+[<Test>]
+let ``Update with only setRaw generates valid query``() =
+    let query =
+        update {
+            for c in sales.customer do
+            setRaw c.personid "COALESCE(?, personid)" [| box 123 |]
+            where (c.customerid = 1)
+        }
+
+    Assert.AreEqual(1, query.Spec.SetRawValues.Length, "Expected 1 raw SET value")
+    Assert.AreEqual(0, query.Spec.SetValues.Length, "Expected 0 regular SET values")
+    // Should not throw - fromUpdate should handle setRaw-only case
+    let sql = query |> toSql
+    printfn "SQL: %s" sql
+    sql.Contains("UPDATE") =! true

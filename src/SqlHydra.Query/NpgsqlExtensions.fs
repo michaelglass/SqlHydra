@@ -137,6 +137,18 @@ type SelectBuilder<'Selected, 'Mapped> with
             | _ -> failwith "NULLS LAST does not support aggregate columns"
         QuerySource<'T, Query>(orderedQuery, state.TableMappings)
 
+    /// SELECT DISTINCT ON (column) - returns first row per unique value of column (PostgreSQL only)
+    [<CustomOperation("distinctOn", MaintainsVariableSpace = true)>]
+    member this.DistinctOn (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
+        let result = LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
+        match result with
+        | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
+            let fqCol = $"\"{tableAlias}\".\"{p.Name}\""
+            let existing = DistinctOnStore.tryTake state.Query |> Option.defaultValue []
+            DistinctOnStore.set state.Query (existing @ [fqCol])
+        | _ -> ()
+        state
+
     /// ORDER BY column DESC NULLS FIRST
     [<CustomOperation("orderByDescNullsFirst", MaintainsVariableSpace = true)>]
     member this.OrderByDescNullsFirst (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =

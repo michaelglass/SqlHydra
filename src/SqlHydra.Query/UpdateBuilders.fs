@@ -51,6 +51,16 @@ type UpdateBuilder<'Updated, 'UpdateReturn>() =
             { query with SetValues = query.SetValues @ [ prop.Name, value ] }
             , state.TableMappings)
 
+    /// Sets a column using a raw SQL expression with parameters.
+    /// Use ? as parameter placeholder. Example: setRaw c.col "COALESCE(?, col)" [| box value |]
+    [<CustomOperation("setRaw", MaintainsVariableSpace = true)>]
+    member this.SetRaw (state: QuerySource<'T>, [<ProjectionParameter>] propertySelector: Expression<Func<'T, 'Prop>>, rawSql: string, parameters: obj array) =
+        let query = state |> getQueryOrDefault
+        let prop = LinqExpressionVisitors.visitPropertySelector<'T, 'Prop> propertySelector :?> Reflection.PropertyInfo
+        QuerySource<'T, UpdateQuerySpec<'T, 'UpdateReturn>>(
+            { query with SetRawValues = query.SetRawValues @ [ prop.Name, rawSql, parameters ] }
+            , state.TableMappings)
+
     /// Includes a column in the update query.
     [<CustomOperation("includeColumn", MaintainsVariableSpace = true)>]
     member this.IncludeColumn (state: QuerySource<'T>, [<ProjectionParameter>] propertySelector) = 

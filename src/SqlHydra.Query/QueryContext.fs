@@ -157,6 +157,14 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     /// Builds an ADO.NET DbCommand from a SqlKata query.
     member this.BuildCommand(query: Query) =
         let compiledQuery = compiler.Compile(query)
+        // Apply PostgreSQL DISTINCT ON if present
+        match DistinctOnStore.tryTake query with
+        | Some columns when provider = Npgsql ->
+            let distinctOnCsv = columns |> String.concat ", "
+            let idx = compiledQuery.Sql.IndexOf("SELECT ")
+            if idx >= 0 then
+                compiledQuery.Sql <- compiledQuery.Sql.Insert(idx + 7, $"DISTINCT ON ({distinctOnCsv}) ")
+        | _ -> ()
         this.BuildCommand(compiledQuery)
 
     /// Returns an ADO.NET data reader for a given query.
@@ -391,24 +399,67 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 return outputValues
         }
     
-    member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) = 
+    /// Applies raw SET expressions to a compiled UPDATE command by injecting raw SQL clauses.
+    member private this.ApplyRawSetValues(cmd: DbCommand, rawValues: (string * string * obj array) list) =
+        for (col, rawSql, parms) in rawValues do
+            let mutable processedSql = rawSql
+            for p in parms do
+                let paramName = $"@p{cmd.Parameters.Count}"
+                let idx = processedSql.IndexOf('?')
+                if idx >= 0 then
+                    processedSql <- processedSql.Substring(0, idx) + paramName + processedSql.Substring(idx + 1)
+                let dbParam = cmd.CreateParameter()
+                dbParam.ParameterName <- paramName
+                dbParam.Value <- if isNull p then box System.DBNull.Value else p
+                cmd.Parameters.Add(dbParam) |> ignore
+            // Check if this column already exists in SET clause (from setRaw-only placeholder)
+            let placeholderPattern = $"\"{col}\" = @"
+            let setIdx = cmd.CommandText.IndexOf("SET ", StringComparison.OrdinalIgnoreCase)
+            let whereIdx = cmd.CommandText.IndexOf(" WHERE", StringComparison.OrdinalIgnoreCase)
+            let setClauseEnd = if whereIdx > 0 then whereIdx else cmd.CommandText.Length
+            let setClause = if setIdx >= 0 then cmd.CommandText.Substring(setIdx, setClauseEnd - setIdx) else ""
+            if setClause.Contains(placeholderPattern) && setClause.Contains("__SETRAW_PLACEHOLDER__") then
+                // Replace the placeholder SET clause with the raw expression
+                let phStart = cmd.CommandText.IndexOf(placeholderPattern, setIdx)
+                if phStart >= 0 then
+                    // Find the end of this placeholder value (next comma or WHERE)
+                    let afterCol = cmd.CommandText.IndexOf("@", phStart + placeholderPattern.Length)
+                    if afterCol >= 0 then
+                        // Find end of placeholder param value
+                        let mutable phEnd = afterCol + 1
+                        while phEnd < cmd.CommandText.Length && cmd.CommandText.[phEnd] <> ',' && cmd.CommandText.[phEnd] <> ' ' do
+                            phEnd <- phEnd + 1
+                        let oldFragment = cmd.CommandText.Substring(phStart, phEnd - phStart)
+                        let newFragment = $"\"{col}\" = {processedSql}"
+                        cmd.CommandText <- cmd.CommandText.Replace(oldFragment, newFragment)
+            else
+                // Inject as additional SET clause before WHERE
+                let insertPoint = if whereIdx > 0 then whereIdx else cmd.CommandText.Length
+                cmd.CommandText <- cmd.CommandText.Insert(insertPoint, $", \"{col}\" = {processedSql}")
+
+    member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) =
         use cmd = this.BuildCommand(query.ToKataQuery())
+        if query.Spec.SetRawValues.Length > 0 then
+            this.ApplyRawSetValues(cmd, query.Spec.SetRawValues)
         cmd.ExecuteNonQuery()
 
-    member this.UpdateAsync (query: UpdateQuery<'T, 'UpdateReturn>) = 
+    member this.UpdateAsync (query: UpdateQuery<'T, 'UpdateReturn>) =
         this.UpdateAsyncWithOptions(query)
-    
-    member this.UpdateAsyncWithOptions (query: UpdateQuery<'T, 'UpdateReturn>, ?cancel: CancellationToken) = 
+
+    member this.UpdateAsyncWithOptions (query: UpdateQuery<'T, 'UpdateReturn>, ?cancel: CancellationToken) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
             let cancel = defaultArg cancel CancellationToken.None
 
             use cmd = this.BuildCommand(query.ToKataQuery())
-            
-            if query.Spec.OutputFields.Length > 0 then 
+
+            if query.Spec.SetRawValues.Length > 0 then
+                this.ApplyRawSetValues(cmd, query.Spec.SetRawValues)
+
+            if query.Spec.OutputFields.Length > 0 then
                 // Append SQL Server output clause
                 cmd.CommandText <- OutputClause.updated query.Spec.OutputFields cmd.CommandText
                 let! outputValues = OutputClause.readValues<'UpdateReturn> cmd cancel query.Spec.OutputFields
-                return outputValues 
+                return outputValues
             else
                 let! rowsInserted = cmd.ExecuteNonQueryAsync(cancel)
                 return Convert.ChangeType(rowsInserted, typeof<'UpdateReturn>) :?> 'UpdateReturn
