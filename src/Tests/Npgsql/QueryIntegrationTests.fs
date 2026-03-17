@@ -949,3 +949,47 @@ let ``Insert with Returning after onConflictDoNothing``() = task {
 
     shared.RollbackTransaction()
 }
+
+[<Test>]
+let ``Insert onConflictDoUpdateCoalesce preserves existing value``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    // Insert initial currency
+    let! _ =
+        insertTask shared {
+            for c in sales.currency do
+            entity
+                {
+                    sales.currency.currencycode = "ZZC"
+                    sales.currency.name = "Coalesce Test"
+                    sales.currency.modifieddate = System.DateTime.Today
+                }
+        }
+
+    // Upsert with same code and different name — name uses COALESCE so non-NULL value wins
+    do!
+        insertTask shared {
+            for c in sales.currency do
+            entity
+                {
+                    sales.currency.currencycode = "ZZC"
+                    sales.currency.name = "Updated Name"
+                    sales.currency.modifieddate = System.DateTime.Today
+                }
+            onConflictDoUpdateCoalesce c.currencycode (c.name, c.modifieddate) c.name
+        } :> Task
+
+    // Verify name was updated (EXCLUDED value was non-NULL, so COALESCE picks it)
+    let! result =
+        selectTask shared {
+            for c in sales.currency do
+            where (c.currencycode = "ZZC")
+            select c.name
+            tryHead
+        }
+
+    result =! Some "Updated Name"
+
+    shared.RollbackTransaction()
+}

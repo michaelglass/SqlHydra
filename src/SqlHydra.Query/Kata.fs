@@ -83,6 +83,7 @@ type InsertType =
     | Insert
     | InsertOrReplace
     | OnConflictDoUpdate of conflictFields: string list * updateFields: string list
+    | OnConflictDoUpdateCoalesce of conflictFields: string list * updateFields: string list * coalesceFields: string list
     | OnConflictDoNothing of conflictFields: string list
     | OnConflictDoNothingWhere of conflictFields: string list * whereClause: string
     | InsertOrUpdateOnUnique of keyFields: string list * updateFields: string list
@@ -302,6 +303,7 @@ module internal KataUtils =
     let failIfIdentityOnConflict spec =
         match spec.IdentityField, spec.InsertType with
         | Some ident, OnConflictDoUpdate (conflictFields, _)
+        | Some ident, OnConflictDoUpdateCoalesce (conflictFields, _, _)
         | Some ident, OnConflictDoNothing conflictFields
         | Some ident, OnConflictDoNothingWhere (conflictFields, _)
         | Some ident, InsertOrUpdateOnUnique (conflictFields, _) ->

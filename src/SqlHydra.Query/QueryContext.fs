@@ -291,6 +291,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             match iq.Spec.InsertType with
             | InsertOrReplace -> OnConflict.insertOrReplace
             | OnConflictDoUpdate (conflictFields, updateFields) -> OnConflict.onConflictDoUpdate conflictFields updateFields
+            | OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) -> OnConflict.onConflictDoUpdateCoalesce iq.Spec.Table conflictFields updateFields coalesceFields
             | OnConflictDoNothing conflictFields -> OnConflict.onConflictDoNothing conflictFields
             | OnConflictDoNothingWhere (conflictFields, whereClause) -> OnConflict.onConflictDoNothingWhere conflictFields whereClause
             | Insert -> id

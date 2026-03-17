@@ -80,6 +80,20 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
         let newSpec = { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields) }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
 
+    /// Performs an upsert with COALESCE for specified columns (preserves existing value when new value is NULL).
+    [<CustomOperation("onConflictDoUpdateCoalesce", MaintainsVariableSpace = true)>]
+    member this.OnConflictDoUpdateCoalesce(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFields,
+        [<ProjectionParameter>] updateFields,
+        [<ProjectionParameter>] coalesceFields) =
+
+        let spec = state.Query
+        let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun tblAlias p -> p.Name)
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun tblAlias p -> p.Name)
+        let coalesceFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'CoalesceProperties> coalesceFields (fun tblAlias p -> p.Name)
+        let newSpec = { spec with InsertType = OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
     /// Insert is ignored if a conflict occurs.
     [<CustomOperation("onConflictDoNothing", MaintainsVariableSpace = true)>]
     member this.OnConflictDoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,

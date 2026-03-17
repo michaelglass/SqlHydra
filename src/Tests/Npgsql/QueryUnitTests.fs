@@ -766,3 +766,49 @@ let ``Update with only setRaw generates valid query``() =
     let sql = query |> toSql
     printfn "SQL: %s" sql
     sql.Contains("UPDATE") =! true
+
+[<Test>]
+let ``Insert onConflictDoUpdateCoalesce stores correct spec``() =
+    let query =
+        insert {
+            for c in sales.currency do
+            entity
+                {
+                    sales.currency.currencycode = "TST"
+                    sales.currency.name = "Test"
+                    sales.currency.modifieddate = System.DateTime.Today
+                }
+            onConflictDoUpdateCoalesce c.currencycode (c.name, c.modifieddate) c.name
+        }
+
+    match query.Spec.InsertType with
+    | OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) ->
+        Assert.AreEqual(["currencycode"], conflictFields)
+        Assert.AreEqual(["name"; "modifieddate"], updateFields)
+        Assert.AreEqual(["name"], coalesceFields)
+    | _ -> Assert.Fail("Expected OnConflictDoUpdateCoalesce")
+
+[<Test>]
+let ``onConflictDoUpdateCoalesce generates COALESCE SQL``() =
+    let query =
+        insert {
+            for c in sales.currency do
+            entity
+                {
+                    sales.currency.currencycode = "TST"
+                    sales.currency.name = "Test"
+                    sales.currency.modifieddate = System.DateTime.Today
+                }
+            onConflictDoUpdateCoalesce c.currencycode (c.name, c.modifieddate) c.name
+        }
+
+    let compiler = SqlKata.Compilers.PostgresCompiler()
+    let compiled = compiler.Compile(query.ToKataQuery())
+    let sql =
+        match query.Spec.InsertType with
+        | OnConflictDoUpdateCoalesce (cf, uf, coal) -> OnConflict.onConflictDoUpdateCoalesce "sales.currency" cf uf coal compiled.Sql
+        | _ -> compiled.Sql
+
+    printfn "SQL: %s" sql
+    sql.Contains("COALESCE") =! true
+    sql.Contains("EXCLUDED") =! true
