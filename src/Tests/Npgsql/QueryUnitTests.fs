@@ -659,3 +659,19 @@ let ``REGRESSION: =% ILIKE on Option string column - production pattern D varian
 
     printfn "SQL: %s" sql
     sql.Contains("ilike") =! true
+
+[<Test>]
+let ``REGRESSION: leftJoin' on' with compound predicate and external value``() =
+    let minDiscount = 0m
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (o.salesorderid = d.Value.salesorderid && d.Value.unitpricediscount > minDiscount)
+            where (o.customerid = 42)
+            select o
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("LEFT JOIN") =! true
+    sql.Contains("AND") =! true
