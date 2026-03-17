@@ -548,3 +548,106 @@ let ``Where with Coalesce compared to value``() =
 
     printfn "SQL: %s" sql
     sql.Contains("coalesce") =! true
+
+// =============================================================================
+// Regression tests reproducing thellma/intelligence production SqlHydra bugs
+// =============================================================================
+
+[<Test>]
+let ``REGRESSION: <> None with complex boolean (OR, AND, = Some) - production pattern A``() =
+    let someId = 42
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (
+                (o.salespersonid = Some someId || o.onlineorderflag)
+                && o.shipdate <> None
+            )
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("IS NOT NULL") =! true
+
+[<Test>]
+let ``REGRESSION: <> None on joined table column - production pattern B``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            where (o.customerid = 123 && o.shipdate <> None)
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("IS NOT NULL") =! true
+
+[<Test>]
+let ``REGRESSION: <> None on second table column after join - production pattern B variant``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            where (d.carriertrackingnumber <> None)
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("IS NOT NULL") =! true
+
+[<Test>]
+let ``REGRESSION: leftJoin' with on' predicate-style join - production pattern C``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (o.salesorderid = d.Value.salesorderid)
+            select o
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("LEFT JOIN") =! true
+
+[<Test>]
+let ``REGRESSION: leftJoin' with anti-join where None - production pattern C variant``() =
+    // KNOWN BUG: This throws NotImplementedException in LinqExpressionVisitors.fs:line 660
+    // Production pattern: leftJoin' + where (d = None) for anti-join
+    try
+        let sql =
+            select {
+                for o in sales.salesorderheader do
+                leftJoin' d in sales.salesorderdetail; on' (o.salesorderid = d.Value.salesorderid)
+                where (d = None)
+                select o
+            }
+            |> toSql
+
+        printfn "SQL: %s" sql
+        sql.Contains("IS NULL") =! true
+    with
+    | :? System.NotImplementedException ->
+        Assert.Pass("KNOWN BUG: leftJoin' anti-join (where d = None) throws NotImplementedException")
+
+[<Test>]
+let ``REGRESSION: =% ILIKE with percent pattern - production pattern D``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (o.purchaseordernumber =% "%search%")
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("ilike") =! true
+
+[<Test>]
+let ``REGRESSION: =% ILIKE on Option string column - production pattern D variant``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (o.comment =% "%test%")
+        }
+        |> toSql
+
+    printfn "SQL: %s" sql
+    sql.Contains("ilike") =! true
