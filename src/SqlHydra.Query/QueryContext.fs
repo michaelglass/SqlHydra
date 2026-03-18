@@ -411,7 +411,8 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 dbParam.Value <- if isNull p then box System.DBNull.Value else p
                 cmd.Parameters.Add(dbParam) |> ignore
 
-            let newClause = $"\"{col}\" = {processedSql}"
+            let wrappedCol = compiler.Wrap(col)
+            let newClause = $"{wrappedCol} = {processedSql}"
 
             // Check if this column has a placeholder from setRaw-only mode
             let placeholderParam =
@@ -422,7 +423,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             match placeholderParam with
             | Some ph ->
                 // Replace the placeholder SET clause entirely
-                let placeholder = $"\"{col}\" = {ph.ParameterName}"
+                let placeholder = $"{wrappedCol} = {ph.ParameterName}"
                 cmd.CommandText <- cmd.CommandText.Replace(placeholder, newClause)
                 cmd.Parameters.Remove(ph)
             | None ->
