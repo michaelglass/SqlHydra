@@ -10,6 +10,7 @@ type TableMapping =
         Name: string
         Schema: string
         RecordType: System.Type option
+        CteQuery: SqlKata.Query option
     }
     member this.IsCte = this.Schema = ""
     member this.IsInTable (m: Linq.Expressions.MemberExpression) =
@@ -209,20 +210,6 @@ module DistinctOnStore =
                 sql.Insert(idx + 7, $"DISTINCT ON ({distinctOnCsv}) ")
             else sql
         | None -> sql
-
-/// Stores CTE query definitions by alias for pickup during For binding.
-module CteQueryStore =
-    open System.Collections.Concurrent
-
-    let private store = ConcurrentDictionary<string, SqlKata.Query>()
-
-    let set (alias: string) (query: SqlKata.Query) =
-        store[alias] <- query
-
-    let tryTake (alias: string) =
-        match store.TryRemove(alias) with
-        | true, q -> Some q
-        | false, _ -> None
 
 module internal KataUtils =
 

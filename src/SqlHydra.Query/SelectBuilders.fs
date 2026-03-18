@@ -121,7 +121,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
         match tblMaybe with
         | Some tbl when tbl.IsCte ->
             let q = query.From($"{tbl.Name} as {tableAlias}")
-            match CteQueryStore.tryTake tbl.Name with
+            match tbl.CteQuery with
             | Some cteQuery -> QuerySource<'T, Query>(q.With(tbl.Name, cteQuery), tableMappings)
             | None -> QuerySource<'T, Query>(q, tableMappings)
         | Some tbl ->

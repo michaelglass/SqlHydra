@@ -92,6 +92,8 @@ type InsertBuilder<'Inserted, 'InsertReturn>() =
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>({ spec with IdentityField = Some prop.Name }, state.TableMappings)
 
     /// Inserts rows from a SELECT query.
+    /// Note: Column alignment between SELECT and target table is validated at runtime by the database,
+    /// not at compile time. Ensure the SELECT columns match the target table's column order and types.
     [<CustomOperation("fromSelect", MaintainsVariableSpace = true)>]
     member this.FromSelect (state: QuerySource<'T>, selectQuery: SelectQuery<'Selected>) =
         let spec = state |> getQueryOrDefault

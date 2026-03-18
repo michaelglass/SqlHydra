@@ -399,6 +399,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     /// Applies raw SET expressions to a compiled UPDATE command by injecting raw SQL clauses.
     member private this.ApplyRawSetValues(cmd: DbCommand, rawValues: (string * string * obj array) list) =
         for (col, rawSql, parms) in rawValues do
+            // Replace ? placeholders with parameterized @pN values
             let mutable processedSql = rawSql
             for p in parms do
                 let paramName = $"@p{cmd.Parameters.Count}"
@@ -409,38 +410,26 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 dbParam.ParameterName <- paramName
                 dbParam.Value <- if isNull p then box System.DBNull.Value else p
                 cmd.Parameters.Add(dbParam) |> ignore
-            // Check if this column already exists in SET clause (from setRaw-only placeholder).
-            // The placeholder value gets parameterized by SqlKata, so we detect it by checking
-            // the parameter collection rather than the SQL text.
-            let placeholderPattern = $"\"{col}\" = @"
-            let setIdx = cmd.CommandText.IndexOf("SET ", StringComparison.OrdinalIgnoreCase)
-            let whereIdx = cmd.CommandText.IndexOf(" WHERE", StringComparison.OrdinalIgnoreCase)
-            let setClauseEnd = if whereIdx > 0 then whereIdx else cmd.CommandText.Length
-            let setClause = if setIdx >= 0 then cmd.CommandText.Substring(setIdx, setClauseEnd - setIdx) else ""
+
+            let newClause = $"\"{col}\" = {processedSql}"
+
+            // Check if this column has a placeholder from setRaw-only mode
             let placeholderParam =
                 cmd.Parameters
-                |> Seq.cast<System.Data.Common.DbParameter>
+                |> Seq.cast<DbParameter>
                 |> Seq.tryFind (fun p -> p.Value :? string && (p.Value :?> string) = "__SETRAW_PLACEHOLDER__")
-            if setClause.Contains(placeholderPattern) && placeholderParam.IsSome then
-                // Remove the orphaned placeholder parameter (no longer referenced in SQL after replacement)
-                cmd.Parameters.Remove(placeholderParam.Value)
-                // Replace the placeholder SET clause with the raw expression
-                let phStart = cmd.CommandText.IndexOf(placeholderPattern, setIdx)
-                if phStart >= 0 then
-                    // Find the end of this placeholder value (next comma or WHERE)
-                    let afterCol = cmd.CommandText.IndexOf("@", phStart + placeholderPattern.Length)
-                    if afterCol >= 0 then
-                        // Find end of placeholder param value
-                        let mutable phEnd = afterCol + 1
-                        while phEnd < cmd.CommandText.Length && cmd.CommandText.[phEnd] <> ',' && cmd.CommandText.[phEnd] <> ' ' do
-                            phEnd <- phEnd + 1
-                        let oldFragment = cmd.CommandText.Substring(phStart, phEnd - phStart)
-                        let newFragment = $"\"{col}\" = {processedSql}"
-                        cmd.CommandText <- cmd.CommandText.Replace(oldFragment, newFragment)
-            else
-                // Inject as additional SET clause before WHERE
+
+            match placeholderParam with
+            | Some ph ->
+                // Replace the placeholder SET clause entirely
+                let placeholder = $"\"{col}\" = {ph.ParameterName}"
+                cmd.CommandText <- cmd.CommandText.Replace(placeholder, newClause)
+                cmd.Parameters.Remove(ph)
+            | None ->
+                // Append as additional SET clause before WHERE
+                let whereIdx = cmd.CommandText.IndexOf(" WHERE", StringComparison.OrdinalIgnoreCase)
                 let insertPoint = if whereIdx > 0 then whereIdx else cmd.CommandText.Length
-                cmd.CommandText <- cmd.CommandText.Insert(insertPoint, $", \"{col}\" = {processedSql}")
+                cmd.CommandText <- cmd.CommandText.Insert(insertPoint, $", {newClause}")
 
     member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) =
         use cmd = this.BuildCommand(query.ToKataQuery())
