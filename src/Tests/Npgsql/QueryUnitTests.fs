@@ -670,6 +670,57 @@ let ``Where =% ILIKE on Option string column``() =
     sql.Contains("ilike") =! true
 
 [<Test>]
+let ``Where =% ILIKE with captured variable pattern``() =
+    let searchTerm = "test"
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (o.purchaseordernumber =% $"%%{searchTerm}%%")
+        }
+        |> toSql
+
+    sql.Contains("ilike") =! true
+
+[<Test>]
+let ``Where =% ILIKE conditional with Option filter``() =
+    let senderFilter = Some "test"
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (senderFilter.IsNone || o.purchaseordernumber =% $"%%{senderFilter.Value}%%")
+        }
+        |> toSql
+
+    sql.Contains("ilike") =! true
+
+[<Test>]
+let ``Where =% ILIKE conditional with None filter skips clause``() =
+    let senderFilter : string option = None
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (senderFilter.IsNone || o.purchaseordernumber =% $"%%{senderFilter.Value}%%")
+        }
+        |> toSql
+
+    // When filter is None, the entire OR should short-circuit
+    // and not produce an ilike clause
+    sql.Contains("ilike") =! false
+
+[<Test>]
+let ``Select with kata SelectRaw adds computed column``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            kata (fun q -> q.SelectRaw("1 + 1 AS computed_col"))
+            select (o.salesorderid, o.totaldue)
+        }
+        |> toSql
+
+    sql.Contains("computed_col") =! true
+    sql.Contains("salesorderid") =! true
+
+[<Test>]
 let ``OrderBy NULLS LAST``() =
     let sql =
         select {
