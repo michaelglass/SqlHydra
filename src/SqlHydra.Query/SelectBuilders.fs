@@ -392,7 +392,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         // Get inner table info
         let innerTable = mergedTables[TableAliasKey innerAlias]
-        let tableName = $"{innerTable.Schema}.{innerTable.Name}"
+        let tableName =
+            if innerTable.Schema = "" then innerTable.Name
+            else $"{innerTable.Schema}.{innerTable.Name}"
 
         let pendingJoin = {
             JoinType = JoinType.Inner
@@ -424,7 +426,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         // Get inner table info
         let innerTable = mergedTables[TableAliasKey innerAlias]
-        let tableName = $"{innerTable.Schema}.{innerTable.Name}"
+        let tableName =
+            if innerTable.Schema = "" then innerTable.Name
+            else $"{innerTable.Schema}.{innerTable.Name}"
 
         let pendingJoin = {
             JoinType = JoinType.Left
@@ -465,7 +469,17 @@ type SelectBuilder<'Selected, 'Mapped> () =
             | JoinType.Left ->
                 query.LeftJoin(tableNameAsAlias, fun j -> joinBuilder j)
 
-        QuerySource<'T, Query>(updatedQuery, state.TableMappings)
+        // After applying the join, register CTE if needed
+        let finalQuery =
+            let innerTable = state.TableMappings |> Map.tryFind (TableAliasKey pendingJoin.TableAlias)
+            match innerTable with
+            | Some tbl when tbl.IsCte ->
+                match tbl.CteQuery with
+                | Some cteQuery -> updatedQuery.With(tbl.Name, cteQuery)
+                | None -> updatedQuery
+            | _ -> updatedQuery
+
+        QuerySource<'T, Query>(finalQuery, state.TableMappings)
 
     /// Sets the GROUP BY for one or more columns.
     [<CustomOperation("groupBy", MaintainsVariableSpace = true)>]

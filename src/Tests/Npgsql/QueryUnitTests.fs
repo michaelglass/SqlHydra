@@ -1433,3 +1433,26 @@ let ``orderByInnerProductDistance emits <#> operator``() =
 
     sql.Contains("<#>") =! true
     sql.Contains("ORDER BY") =! true
+
+[<Test>]
+let ``CTE can be used as leftJoin' source``() =
+    let innerQuery =
+        select {
+            for d in sales.salesorderdetail do
+            select {| OrderId = d.salesorderid; Total = d.unitprice |}
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' s in Table.cteFrom<{| OrderId: int; Total: decimal |}> "order_stats" innerQuery
+            on' (s.Value.OrderId = o.salesorderid)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("WITH") =! true
+    sql.Contains("order_stats") =! true
+    sql.Contains("LEFT JOIN") =! true
+    // Should NOT contain ".order_stats" (empty schema prefix)
+    sql.Contains("\".\"order_stats\"") =! false
