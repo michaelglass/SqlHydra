@@ -426,3 +426,266 @@ let ``Generated: where on outer table column after leftJoin' — unmatched row r
 
     shared.RollbackTransaction()
 }
+
+// ============================================================
+// Chained join scalability: do BlockExpression fixes scale to 3+ joins?
+// ============================================================
+
+[<Test>]
+let ``Generated: 3-way join chain — third join outer key from 2-element tuple``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId  = Guid.NewGuid()
+    let userId   = Guid.NewGuid()
+    let prefId   = Guid.NewGuid()
+    let artId    = Guid.NewGuid()
+
+    execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'Src3')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{emailId}', '{sourceId}', 'c@test.com')"
+    execSql shared $"INSERT INTO public.test_preferences (id, source_id, user_id, priority) VALUES ('{prefId}', '{sourceId}', '{userId}', 9)"
+    execSql shared $"INSERT INTO public.test_articles (id, email_id, title) VALUES ('{artId}', '{emailId}', 'Title3')"
+
+    // join 1: email.source_id (Option<Guid>) = Some source.id
+    // join 2: source.id = pref.source_id          ← outer from (email * source)
+    // join 3: email.id  = article.email_id         ← outer key e.id from (email * source * pref)
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            join s in ``public``.test_sources on (e.source_id = Some s.id)
+            join p in ``public``.test_preferences on (s.id = p.source_id)
+            join a in ``public``.test_articles on (e.id = a.email_id)
+            select (e.sender, s.name, p.priority, a.title)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "Expected 1 row from 3-way join chain")
+    let (sender, sname, pri, title) = resultList.[0]
+    Assert.AreEqual("c@test.com", sender)
+    Assert.AreEqual("Src3",  sname)
+    Assert.AreEqual(9, pri)
+    Assert.AreEqual("Title3", title)
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Generated: 3-way join with where on column from second joined table``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let source1Id = Guid.NewGuid()
+    let source2Id = Guid.NewGuid()
+    let email1Id  = Guid.NewGuid()
+    let email2Id  = Guid.NewGuid()
+    let userId    = Guid.NewGuid()
+    let pref1Id   = Guid.NewGuid()
+    let pref2Id   = Guid.NewGuid()
+
+    execSql shared $"INSERT INTO public.test_sources (id, name, priority) VALUES ('{source1Id}', 'SrcA', 5)"
+    execSql shared $"INSERT INTO public.test_sources (id, name, priority) VALUES ('{source2Id}', 'SrcB', 3)"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{email1Id}', '{source1Id}', 'd@test.com')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{email2Id}', '{source2Id}', 'e@test.com')"
+    execSql shared $"INSERT INTO public.test_preferences (id, source_id, user_id, priority) VALUES ('{pref1Id}', '{source1Id}', '{userId}', 1)"
+    execSql shared $"INSERT INTO public.test_preferences (id, source_id, user_id, priority) VALUES ('{pref2Id}', '{source2Id}', '{userId}', 2)"
+
+    // 3-way join with a where clause on s.name (column from first joined table, in 3-element tuple state)
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            join s in ``public``.test_sources on (e.source_id = Some s.id)
+            join p in ``public``.test_preferences on (s.id = p.source_id)
+            where (s.name = "SrcA")
+            select (e.sender, s.name, p.priority)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "WHERE on 2nd-joined table column should filter correctly")
+    let (sender, sname, pri) = resultList.[0]
+    Assert.AreEqual("d@test.com", sender)
+    Assert.AreEqual("SrcA", sname)
+    Assert.AreEqual(1, pri)
+
+    shared.RollbackTransaction()
+}
+
+// ============================================================
+// leftJoin' scalability: multiple leftJoin's, mixed join + leftJoin'
+// ============================================================
+
+[<Test>]
+let ``Generated: two leftJoin's chained — both sides populated``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId  = Guid.NewGuid()
+    let userId   = Guid.NewGuid()
+    let prefId   = Guid.NewGuid()
+    let artId    = Guid.NewGuid()
+
+    execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'SrcLJ')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{emailId}', '{sourceId}', 'lj@test.com')"
+    execSql shared $"INSERT INTO public.test_preferences (id, source_id, user_id, priority) VALUES ('{prefId}', '{sourceId}', '{userId}', 42)"
+    execSql shared $"INSERT INTO public.test_articles (id, email_id, title) VALUES ('{artId}', '{emailId}', 'LJArt')"
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            leftJoin' s in ``public``.test_sources
+            on' (s.Value.id = e.source_id.Value)
+            leftJoin' a in ``public``.test_articles
+            on' (a.Value.email_id = e.id)
+            select (e.id, s, a)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length)
+    let (eid, sOpt, aOpt) = resultList.[0]
+    Assert.AreEqual(emailId, eid)
+    Assert.IsTrue(sOpt.IsSome)
+    Assert.AreEqual("SrcLJ", sOpt.Value.name)
+    Assert.IsTrue(aOpt.IsSome)
+    Assert.AreEqual("LJArt", aOpt.Value.title)
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Generated: two leftJoin's — second side unmatched returns None``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId  = Guid.NewGuid()
+
+    execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'SrcLJ2')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{emailId}', '{sourceId}', 'lj2@test.com')"
+    // No articles inserted — second leftJoin' should produce None
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            leftJoin' s in ``public``.test_sources
+            on' (s.Value.id = e.source_id.Value)
+            leftJoin' a in ``public``.test_articles
+            on' (a.Value.email_id = e.id)
+            select (e.id, s, a)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length)
+    let (eid, sOpt, aOpt) = resultList.[0]
+    Assert.AreEqual(emailId, eid)
+    Assert.IsTrue(sOpt.IsSome)
+    Assert.IsTrue(aOpt.IsNone, "No article inserted — should be None")
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Generated: two leftJoin's with where on outer table``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let src1Id = Guid.NewGuid()
+    let src2Id = Guid.NewGuid()
+    let em1Id  = Guid.NewGuid()
+    let em2Id  = Guid.NewGuid()
+
+    execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{src1Id}', 'Keep')"
+    execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{src2Id}', 'Drop')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{em1Id}', '{src1Id}', 'keep@test.com')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{em2Id}', '{src2Id}', 'drop@test.com')"
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            leftJoin' s in ``public``.test_sources
+            on' (s.Value.id = e.source_id.Value)
+            leftJoin' a in ``public``.test_articles
+            on' (a.Value.email_id = e.id)
+            where (e.sender = "keep@test.com")
+            select (e.sender, s, a)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "WHERE on outer table should filter to 1 row")
+    let (sender, _, _) = resultList.[0]
+    Assert.AreEqual("keep@test.com", sender)
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Generated: join then leftJoin' — mixed inner and outer join``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let sourceId = Guid.NewGuid()
+    let emailId  = Guid.NewGuid()
+    let userId   = Guid.NewGuid()
+    let prefId   = Guid.NewGuid()
+
+    execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{sourceId}', 'MixSrc')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{emailId}', '{sourceId}', 'mix@test.com')"
+    execSql shared $"INSERT INTO public.test_preferences (id, source_id, user_id, priority) VALUES ('{prefId}', '{sourceId}', '{userId}', 5)"
+    // No article — the leftJoin' should return None for article
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            join s in ``public``.test_sources on (e.source_id = Some s.id)
+            leftJoin' a in ``public``.test_articles
+            on' (a.Value.email_id = e.id)
+            select (e.sender, s.name, a)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length)
+    let (sender, sname, aOpt) = resultList.[0]
+    Assert.AreEqual("mix@test.com", sender)
+    Assert.AreEqual("MixSrc", sname)
+    Assert.IsTrue(aOpt.IsNone, "No article — leftJoin' should be None")
+
+    shared.RollbackTransaction()
+}
+
+[<Test>]
+let ``Generated: join then leftJoin' with where on inner-joined column``() = task {
+    use! shared = db.OpenContextAsync()
+    shared.BeginTransaction()
+
+    let src1Id = Guid.NewGuid()
+    let src2Id = Guid.NewGuid()
+    let em1Id  = Guid.NewGuid()
+    let em2Id  = Guid.NewGuid()
+    let artId  = Guid.NewGuid()
+
+    execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{src1Id}', 'TargetSrc')"
+    execSql shared $"INSERT INTO public.test_sources (id, name) VALUES ('{src2Id}', 'OtherSrc')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{em1Id}', '{src1Id}', 'target@test.com')"
+    execSql shared $"INSERT INTO public.test_emails (id, source_id, sender) VALUES ('{em2Id}', '{src2Id}', 'other@test.com')"
+    execSql shared $"INSERT INTO public.test_articles (id, email_id, title) VALUES ('{artId}', '{em1Id}', 'TgtArt')"
+
+    let! results =
+        selectTask shared {
+            for e in ``public``.test_emails do
+            join s in ``public``.test_sources on (e.source_id = Some s.id)
+            leftJoin' a in ``public``.test_articles
+            on' (a.Value.email_id = e.id)
+            where (s.name = "TargetSrc")
+            select (e.sender, s.name, a)
+        }
+
+    let resultList = results |> Seq.toList
+    Assert.AreEqual(1, resultList.Length, "WHERE on inner-joined column should filter correctly")
+    let (sender, sname, aOpt) = resultList.[0]
+    Assert.AreEqual("target@test.com", sender)
+    Assert.AreEqual("TargetSrc", sname)
+    Assert.IsTrue(aOpt.IsSome)
+    Assert.AreEqual("TgtArt", aOpt.Value.title)
+
+    shared.RollbackTransaction()
+}
