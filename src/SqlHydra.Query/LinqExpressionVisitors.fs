@@ -659,17 +659,28 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 then visit right (Query())
                 else query
             | _ ->
+                // Try evaluating non-column bool expressions (e.g., capturedOption.IsSome)
+                match (try nEvaluate left |> Some with _ -> None) with
+                | Some (:? bool as enabled) ->
+                    if enabled then visit right (Query()) else query
+                | _ ->
                 let lt = visit left (Query())
                 let rt = visit right (Query())
                 query.Where(fun q -> lt).Where(fun q -> rt)
 
         | NBinaryOr(left, right) ->
             match left with
+            // Allow user to enable or disable right side where clause
             | NValue enabled ->
                 if enabled :?> bool
                 then visit right (Query())
                 else query
             | _ ->
+                // Try evaluating non-column bool expressions (e.g., capturedOption.IsSome)
+                match (try nEvaluate left |> Some with _ -> None) with
+                | Some (:? bool as enabled) ->
+                    if enabled then visit right (Query()) else query
+                | _ ->
                 let lt = visit left (Query())
                 let rt = visit right (Query())
                 query.OrWhere(fun q -> lt).OrWhere(fun q -> rt)

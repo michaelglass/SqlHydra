@@ -682,12 +682,12 @@ let ``Where =% ILIKE with captured variable pattern``() =
     sql.Contains("ilike") =! true
 
 [<Test>]
-let ``Where =% ILIKE conditional with Option filter``() =
+let ``Where =% ILIKE conditional with Some filter includes clause``() =
     let senderFilter = Some "test"
     let sql =
         select {
             for o in sales.salesorderheader do
-            where (senderFilter.IsNone || o.purchaseordernumber =% $"%%{senderFilter.Value}%%")
+            where (senderFilter.IsSome && o.purchaseordernumber =% $"%%{senderFilter.Value}%%")
         }
         |> toSql
 
@@ -699,12 +699,11 @@ let ``Where =% ILIKE conditional with None filter skips clause``() =
     let sql =
         select {
             for o in sales.salesorderheader do
-            where (senderFilter.IsNone || o.purchaseordernumber =% $"%%{senderFilter.Value}%%")
+            where (senderFilter.IsSome && o.purchaseordernumber =% $"%%{senderFilter.Value}%%")
         }
         |> toSql
 
-    // When filter is None, the entire OR should short-circuit
-    // and not produce an ilike clause
+    // When filter is None, IsSome=false short-circuits && and skips the ILIKE clause
     sql.Contains("ilike") =! false
 
 [<Test>]
