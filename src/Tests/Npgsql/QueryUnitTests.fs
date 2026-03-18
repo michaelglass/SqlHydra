@@ -1286,7 +1286,8 @@ let ``whereNotExists produces NOT EXISTS SQL``() =
         }
         |> toSql
 
-    sql.Contains("NOT EXISTS") =! true
+    sql.Contains("NOT EXISTS (SELECT") =! true
+    sql.Contains("\"salesorderdetail\"") =! true
 
 [<Test>]
 let ``whereExists produces EXISTS SQL``() =
@@ -1305,7 +1306,8 @@ let ``whereExists produces EXISTS SQL``() =
         }
         |> toSql
 
-    sql.Contains("EXISTS") =! true
+    sql.Contains("EXISTS (SELECT") =! true
+    sql.Contains("\"salesorderdetail\"") =! true
     // Make sure it's not "NOT EXISTS"
     let notExistsCount = System.Text.RegularExpressions.Regex.Matches(sql, "NOT EXISTS").Count
     notExistsCount =! 0
@@ -1349,10 +1351,11 @@ let ``where with Option variable None emits IS NULL``() =
         }
         |> toSql
 
-    sql.Contains("IS NULL") =! true
+    sql.Contains("\"o\".\"comment\" IS NULL") =! true
+    sql.Contains("= NULL") =! false
 
 [<Test>]
-let ``where with Option variable Some emits equals``() =
+let ``where with Option variable Some emits parameterized equals``() =
     let provider: string option = Some "test"
     let sql =
         select {
@@ -1362,7 +1365,7 @@ let ``where with Option variable Some emits equals``() =
         }
         |> toSql
 
-    sql.Contains("=") =! true
+    sql.Contains("\"o\".\"comment\" = @p") =! true
     sql.Contains("IS NULL") =! false
 
 [<Test>]
@@ -1376,10 +1379,11 @@ let ``where with int Option variable None emits IS NULL``() =
         }
         |> toSql
 
-    sql.Contains("IS NULL") =! true
+    sql.Contains("\"o\".\"creditcardid\" IS NULL") =! true
+    sql.Contains("= NULL") =! false
 
 [<Test>]
-let ``where with int Option variable Some emits equals``() =
+let ``where with int Option variable Some emits parameterized equals``() =
     let creditCard: int option = Some 42
     let sql =
         select {
@@ -1389,7 +1393,7 @@ let ``where with int Option variable Some emits equals``() =
         }
         |> toSql
 
-    sql.Contains("=") =! true
+    sql.Contains("\"o\".\"creditcardid\" = @p") =! true
     sql.Contains("IS NULL") =! false
 
 [<Test>]
@@ -1468,7 +1472,7 @@ let ``countDistinct in select produces COUNT(DISTINCT col)``() =
         }
         |> toSql
 
-    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("COUNT(DISTINCT \"d\".\"salesorderdetailid\")") =! true
 
 [<Test>]
 let ``countDistinct in having``() =
@@ -1482,6 +1486,7 @@ let ``countDistinct in having``() =
         }
         |> toSql
 
-    sql.Contains("COUNT(DISTINCT") =! true
     sql.Contains("HAVING") =! true
+    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("salesorderdetailid") =! true
 
