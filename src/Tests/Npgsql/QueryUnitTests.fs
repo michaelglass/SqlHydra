@@ -942,7 +942,7 @@ let ``Multi-join select whole first table``() =
         }
         |> toSql
 
-    sql.Contains("SELECT o.*") =! true
+    sql.Contains("\"o\".*") =! true
     sql.Contains("INNER JOIN") =! true
 
 [<Test>]
@@ -956,5 +956,5 @@ let ``leftJoin' select mixed tuple with table var and scalar``() =
         |> toSql
 
     sql.Contains("LEFT JOIN") =! true
-    sql.Contains("d.*") =! true
-    sql.Contains("\"salesorderid\"") =! true
+    sql.Contains("\"d\".*") =! true
+    sql.Contains("\"o\".\"salesorderid\"") =! true
