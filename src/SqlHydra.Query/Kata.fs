@@ -219,14 +219,25 @@ module DistinctOnStore =
             Some cols
         | false, _ -> None
 
-    /// Applies DISTINCT ON to compiled SQL if present
+    /// Applies DISTINCT ON to compiled SQL if present.
+    /// Finds the first SELECT at parenthesis depth 0 (skipping CTEs and subqueries).
     let applyToSql (query: SqlKata.Query) (sql: string) =
         match tryTake query with
         | Some columns ->
             let distinctOnCsv = columns |> String.concat ", "
-            let idx = sql.IndexOf("SELECT ")
+            let selectToken = "SELECT "
+            let mutable depth = 0
+            let mutable idx = -1
+            for i in 0 .. sql.Length - selectToken.Length do
+                if idx < 0 then
+                    match sql.[i] with
+                    | '(' -> depth <- depth + 1
+                    | ')' -> depth <- depth - 1
+                    | 'S' when depth = 0 && sql.Substring(i, selectToken.Length) = selectToken ->
+                        idx <- i
+                    | _ -> ()
             if idx >= 0 then
-                sql.Insert(idx + 7, $"DISTINCT ON ({distinctOnCsv}) ")
+                sql.Insert(idx + selectToken.Length, $"DISTINCT ON ({distinctOnCsv}) ")
             else sql
         | None -> sql
 

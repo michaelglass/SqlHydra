@@ -666,6 +666,30 @@ let ``DISTINCT ON single column``() =
     sql.Contains("\"customerid\"") =! true
 
 [<Test>]
+let ``DISTINCT ON with CTE injects into outer SELECT not CTE``() =
+    let innerQuery =
+        select {
+            for c in sales.customer do
+            select {| CustomerId = c.customerid; StoreId = c.storeid |}
+        }
+
+    let sql =
+        select {
+            for c in Table.cte<{| CustomerId: int; StoreId: int option |}> "cust_cte" innerQuery do
+            distinctOn c.CustomerId
+            select c
+        }
+        |> toSql
+
+    // DISTINCT ON must be in the outer SELECT, not inside the CTE
+    let distinctIdx = sql.IndexOf("DISTINCT ON")
+    Assert.IsTrue(distinctIdx >= 0, "Should contain DISTINCT ON")
+    // Verify it comes after the CTE closing paren
+    let cteSelectIdx = sql.IndexOf("SELECT ", 0)  // First SELECT is inside CTE
+    let outerSelectIdx = sql.IndexOf("SELECT ", cteSelectIdx + 1)  // Second SELECT is outer
+    Assert.IsTrue(distinctIdx > cteSelectIdx, "DISTINCT ON should not be in CTE's SELECT")
+
+[<Test>]
 let ``REGRESSION: leftJoin' on' with compound predicate and external value``() =
     let minDiscount = 0m
     let sql =
@@ -907,3 +931,30 @@ let ``CASE WHEN in select with comparison``() =
         |> toSql
 
     sql.Contains("CASE WHEN") =! true
+
+[<Test>]
+let ``Multi-join select whole first table``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("SELECT o.*") =! true
+    sql.Contains("INNER JOIN") =! true
+
+[<Test>]
+let ``leftJoin' select mixed tuple with table var and scalar``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail; on' (d.Value.salesorderid = o.salesorderid)
+            select (d, o.salesorderid)
+        }
+        |> toSql
+
+    sql.Contains("LEFT JOIN") =! true
+    sql.Contains("d.*") =! true
+    sql.Contains("\"salesorderid\"") =! true
