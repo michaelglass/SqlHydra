@@ -1393,46 +1393,46 @@ let ``where with int Option variable Some emits equals``() =
     sql.Contains("IS NULL") =! false
 
 [<Test>]
-let ``orderByCosineDistance emits <=> operator``() =
+let ``orderByCosineDistance emits <=> with typed column``() =
     let vector = [| 0.1f; 0.2f; 0.3f |]
     let sql =
         select {
             for o in sales.salesorderheader do
-            orderByCosineDistance "\"o\".\"embedding\"" (box vector)
+            orderByCosineDistance o.comment (box vector)
             select o
         }
         |> toSql
 
     sql.Contains("<=>") =! true
-    sql.Contains("ORDER BY") =! true
+    sql.Contains("\"o\".\"comment\"") =! true
 
 [<Test>]
-let ``orderByL2Distance emits <-> operator``() =
+let ``orderByL2Distance emits <-> with typed column``() =
     let vector = [| 0.1f; 0.2f; 0.3f |]
     let sql =
         select {
             for o in sales.salesorderheader do
-            orderByL2Distance "\"o\".\"embedding\"" (box vector)
+            orderByL2Distance o.comment (box vector)
             select o
         }
         |> toSql
 
     sql.Contains("<->") =! true
-    sql.Contains("ORDER BY") =! true
+    sql.Contains("\"o\".\"comment\"") =! true
 
 [<Test>]
-let ``orderByInnerProductDistance emits <#> operator``() =
+let ``orderByInnerProductDistance emits <#> with typed column``() =
     let vector = [| 0.1f; 0.2f; 0.3f |]
     let sql =
         select {
             for o in sales.salesorderheader do
-            orderByInnerProductDistance "\"o\".\"embedding\"" (box vector)
+            orderByInnerProductDistance o.comment (box vector)
             select o
         }
         |> toSql
 
     sql.Contains("<#>") =! true
-    sql.Contains("ORDER BY") =! true
+    sql.Contains("\"o\".\"comment\"") =! true
 
 [<Test>]
 let ``CTE can be used as leftJoin' source``() =
