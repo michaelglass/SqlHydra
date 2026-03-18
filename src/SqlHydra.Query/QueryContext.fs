@@ -398,13 +398,10 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     
     /// Adds raw SET parameter bindings from SetRawParamStore to a command.
     member private this.ApplySetRawParams(cmd: DbCommand, kataQuery: Query) =
-        match SetRawParamStore.tryTake kataQuery with
+        match SetRawParamStore.tryGet kataQuery with
         | Some parms ->
             for (name, value) in parms do
-                let p = cmd.CreateParameter()
-                p.ParameterName <- name
-                p.Value <- if isNull value then box System.DBNull.Value else value
-                cmd.Parameters.Add(p) |> ignore
+                cmd.Parameters.Add(createParam cmd name value) |> ignore
         | None -> ()
 
     member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) =

@@ -684,10 +684,12 @@ let ``DISTINCT ON with CTE injects into outer SELECT not CTE``() =
     // DISTINCT ON must be in the outer SELECT, not inside the CTE
     let distinctIdx = sql.IndexOf("DISTINCT ON")
     Assert.IsTrue(distinctIdx >= 0, "Should contain DISTINCT ON")
-    // Verify it comes after the CTE closing paren
+    // Verify DISTINCT ON is in the outer SELECT (after CTE), not the inner one
     let cteSelectIdx = sql.IndexOf("SELECT ", 0)  // First SELECT is inside CTE
     let outerSelectIdx = sql.IndexOf("SELECT ", cteSelectIdx + 1)  // Second SELECT is outer
-    Assert.IsTrue(distinctIdx > cteSelectIdx, "DISTINCT ON should not be in CTE's SELECT")
+    Assert.IsTrue(outerSelectIdx > 0, "Should have an outer SELECT after CTE")
+    Assert.IsTrue(distinctIdx >= outerSelectIdx, $"DISTINCT ON (at {distinctIdx}) should be at or after outer SELECT (at {outerSelectIdx})")
+    Assert.IsTrue(distinctIdx < outerSelectIdx + "SELECT DISTINCT ON".Length + 50, $"DISTINCT ON should be near the outer SELECT, not far after it")
 
 [<Test>]
 let ``REGRESSION: leftJoin' on' with compound predicate and external value``() =

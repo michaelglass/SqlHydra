@@ -192,12 +192,10 @@ module SetRawParamStore =
         store.Remove(query) |> ignore
         store.Add(query, parms)
 
-    /// Gets and removes raw SET parameter bindings for a query
-    let tryTake (query: SqlKata.Query) =
+    /// Gets raw SET parameter bindings for a query (non-destructive; entry cleaned up by GC).
+    let tryGet (query: SqlKata.Query) =
         match store.TryGetValue(query) with
-        | true, parms ->
-            store.Remove(query) |> ignore
-            Some parms
+        | true, parms -> Some parms
         | false, _ -> None
 
 /// Module to store DISTINCT ON column info for PostgreSQL queries.
@@ -305,39 +303,31 @@ module internal KataUtils =
             | None, setValues -> setValues |> List.toArray
 
         // Process setRaw values into UnsafeLiteral kvps and collect parameter bindings
+        let rawKvps = ResizeArray<KeyValuePair<string, obj>>()
+        let allRawBindings = ResizeArray<string * obj>()
         let mutable rawParamCounter = 0
-        let rawKvps, rawParamBindings =
-            spec.SetRawValues
-            |> List.map (fun (col, rawSql, parms) ->
-                let mutable processedSql = rawSql
-                let bindings = ResizeArray<string * obj>()
-                for p in parms do
-                    let paramName = $"@__raw_{rawParamCounter}"
-                    rawParamCounter <- rawParamCounter + 1
-                    let idx = processedSql.IndexOf('?')
-                    if idx >= 0 then
-                        processedSql <- processedSql.Substring(0, idx) + paramName + processedSql.Substring(idx + 1)
-                        bindings.Add(paramName, if isNull p then box System.DBNull.Value else p)
-                    else
-                        failwith $"setRaw: more parameters supplied than '?' placeholders in SQL: '{rawSql}'"
-                (col, UnsafeLiteral(processedSql) :> obj), bindings |> Seq.toList
-            )
-            |> List.unzip
-
-        let allKvps =
-            Array.append kvps (rawKvps |> List.toArray)
+        for (col, rawSql, parms) in spec.SetRawValues do
+            let mutable processedSql = rawSql
+            for p in parms do
+                let paramName = $"@__raw_{rawParamCounter}"
+                rawParamCounter <- rawParamCounter + 1
+                let idx = processedSql.IndexOf('?')
+                if idx >= 0 then
+                    processedSql <- processedSql.Substring(0, idx) + paramName + processedSql.Substring(idx + 1)
+                    allRawBindings.Add(paramName, if isNull p then box System.DBNull.Value else p)
+                else
+                    failwith $"setRaw: more parameters supplied than '?' placeholders in SQL: '{rawSql}'"
+            rawKvps.Add(KeyValuePair(col, UnsafeLiteral(processedSql) :> obj))
 
         let preparedKvps =
-            allKvps
-            |> Seq.map (fun (key,value) -> KeyValuePair(key, value))
-            |> Seq.toArray
+            [| for (k, v) in kvps -> KeyValuePair(k, v)
+               yield! rawKvps |]
 
         let q = Query(spec.Table).AsUpdate(preparedKvps)
 
         // Store raw parameter bindings for later use in QueryContext
-        let allRawBindings = rawParamBindings |> List.concat
-        if allRawBindings.Length > 0 then
-            SetRawParamStore.set q allRawBindings
+        if allRawBindings.Count > 0 then
+            SetRawParamStore.set q (allRawBindings |> Seq.toList)
 
         // Apply `where` clause
         match spec.Where with
