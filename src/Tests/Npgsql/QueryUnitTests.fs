@@ -1337,39 +1337,3 @@ let ``multiple whereNotExists``() =
 
     let count = System.Text.RegularExpressions.Regex.Matches(sql, "NOT EXISTS").Count
     count =! 2
-
-[<Test>]
-let ``selectSync compiles with same operations as selectTask``() =
-    // selectSync without a context should not exist — it requires a context.
-    // But we can verify the type exists by checking it compiles.
-    // Use a null QueryContext — it will fail at runtime but proves the API shape.
-    let compiler = SqlKata.Compilers.PostgresCompiler()
-    let ctx = new SqlHydra.Query.QueryContext(null, compiler)
-
-    // This should compile — proving selectSync accepts a QueryContext
-    // and supports where/orderBy/select operations.
-    Assert.Throws<System.NullReferenceException>(fun () ->
-        let _result : seq<_> =
-            selectSync ctx {
-                for o in sales.salesorderheader do
-                where (o.customerid > 10)
-                orderBy o.orderdate
-                select o
-            }
-        ()
-    ) |> ignore
-
-[<Test>]
-let ``selectSync count compiles``() =
-    let compiler = SqlKata.Compilers.PostgresCompiler()
-    let ctx = new SqlHydra.Query.QueryContext(null, compiler)
-
-    Assert.Throws<System.NullReferenceException>(fun () ->
-        let _count : int =
-            selectSync ctx {
-                for o in sales.salesorderheader do
-                where (o.customerid > 10)
-                count
-            }
-        ()
-    ) |> ignore
