@@ -91,6 +91,13 @@ type InsertBuilder<'Inserted, 'InsertReturn>() =
         
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>({ spec with IdentityField = Some prop.Name }, state.TableMappings)
 
+    /// Inserts rows from a SELECT query.
+    [<CustomOperation("fromSelect", MaintainsVariableSpace = true)>]
+    member this.FromSelect (state: QuerySource<'T>, selectQuery: SelectQuery<'Selected>) =
+        let spec = state |> getQueryOrDefault
+        let newSpec = { spec with InsertType = InsertFromSelect (selectQuery.ToKataQuery()) }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
     /// Sets a CancellationToken for the query execution.
     [<CustomOperation("cancel", MaintainsVariableSpace = true)>]
     member this.Cancel (state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, cancellationToken: CancellationToken) =
@@ -113,7 +120,7 @@ type InsertAsyncBuilder<'Inserted, 'InsertReturn>(ct: ContextType) =
                 let insertQuery = InsertQuery<'Inserted, 'InsertReturn>(state.Query)
                 let! asyncCancel = Async.CancellationToken
                 let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
-                if state.Query.Entities |> Seq.isEmpty then
+                if state.Query.Entities |> Seq.isEmpty && (match state.Query.InsertType with InsertFromSelect _ -> false | _ -> true) then
                     return Unchecked.defaultof<'InsertReturn>
                 else
                     let! insertReturn = ctx.InsertAsyncWithOptions (insertQuery, cancel) |> Async.AwaitTask
@@ -132,7 +139,7 @@ type InsertTaskBuilder<'Inserted, 'InsertReturn>(ct: ContextType) =
             let! ctx = ContextUtils.getContext ct
             try
                 let insertQuery = InsertQuery<'Inserted, 'InsertReturn>(state.Query)
-                if state.Query.Entities |> Seq.isEmpty then
+                if state.Query.Entities |> Seq.isEmpty && (match state.Query.InsertType with InsertFromSelect _ -> false | _ -> true) then
                     return Unchecked.defaultof<'InsertReturn>
                 else
                     let! insertReturn = ctx.InsertAsyncWithOptions (insertQuery, this.CancellationToken)

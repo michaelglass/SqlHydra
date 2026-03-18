@@ -296,6 +296,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             | OnConflictDoNothingWhere (conflictFields, whereClause) -> OnConflict.onConflictDoNothingWhere conflictFields whereClause
             | Insert -> id
             | InsertOrUpdateOnUnique _ -> id // handled above
+            | InsertFromSelect _ -> id
 
         match iq.Spec with
         | { IdentityField = Some identityField } ->
@@ -413,13 +414,21 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 dbParam.ParameterName <- paramName
                 dbParam.Value <- if isNull p then box System.DBNull.Value else p
                 cmd.Parameters.Add(dbParam) |> ignore
-            // Check if this column already exists in SET clause (from setRaw-only placeholder)
+            // Check if this column already exists in SET clause (from setRaw-only placeholder).
+            // The placeholder value gets parameterized by SqlKata, so we detect it by checking
+            // the parameter collection rather than the SQL text.
             let placeholderPattern = $"\"{col}\" = @"
             let setIdx = cmd.CommandText.IndexOf("SET ", StringComparison.OrdinalIgnoreCase)
             let whereIdx = cmd.CommandText.IndexOf(" WHERE", StringComparison.OrdinalIgnoreCase)
             let setClauseEnd = if whereIdx > 0 then whereIdx else cmd.CommandText.Length
             let setClause = if setIdx >= 0 then cmd.CommandText.Substring(setIdx, setClauseEnd - setIdx) else ""
-            if setClause.Contains(placeholderPattern) && setClause.Contains("__SETRAW_PLACEHOLDER__") then
+            let placeholderParam =
+                cmd.Parameters
+                |> Seq.cast<System.Data.Common.DbParameter>
+                |> Seq.tryFind (fun p -> p.Value :? string && (p.Value :?> string) = "__SETRAW_PLACEHOLDER__")
+            if setClause.Contains(placeholderPattern) && placeholderParam.IsSome then
+                // Remove the orphaned placeholder parameter (no longer referenced in SQL after replacement)
+                cmd.Parameters.Remove(placeholderParam.Value)
                 // Replace the placeholder SET clause with the raw expression
                 let phStart = cmd.CommandText.IndexOf(placeholderPattern, setIdx)
                 if phStart >= 0 then

@@ -95,6 +95,7 @@ type InsertType =
     | OnConflictDoNothing of conflictFields: string list
     | OnConflictDoNothingWhere of conflictFields: string list * whereClause: string
     | InsertOrUpdateOnUnique of keyFields: string list * updateFields: string list
+    | InsertFromSelect of selectQuery: SqlKata.Query
 
 type InsertQuerySpec<'T, 'Identity> =
     {
@@ -288,15 +289,26 @@ module internal KataUtils =
         | None -> q
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) =
-        let includedProperties = 
+        match spec.InsertType with
+        | InsertFromSelect selectQuery ->
+            let columns =
+                match spec.Fields with
+                | [] ->
+                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                    |> Array.map (fun p -> p.Name)
+                | fields -> fields |> List.toArray
+            Query(spec.Table).AsInsert(columns, selectQuery)
+        | _ ->
+
+        let includedProperties =
             match spec.Fields with
-            | [] -> 
-                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) 
+            | [] ->
+                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
             | fields ->
                 let included = fields |> Set.ofList
-                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) 
-                |> Array.filter (fun p -> included.Contains(p.Name)) 
-    
+                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                |> Array.filter (fun p -> included.Contains(p.Name))
+
         match spec.Entities with
         | [] -> 
             failwith "At least one `entity` or `entities` must be set in the `insert` builder."

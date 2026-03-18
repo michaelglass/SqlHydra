@@ -890,6 +890,25 @@ let ``CASE WHEN in select with bool column``() =
     sql.Contains("END") =! true
 
 [<Test>]
+let ``INSERT from SELECT``() =
+    let sourceQuery =
+        select {
+            for a in person.address do
+            where (a.city = "Seattle")
+            select (a.city, a.addressid)
+        }
+
+    let query =
+        insert {
+            into person.address
+            fromSelect sourceQuery
+        }
+
+    match query.Spec.InsertType with
+    | InsertFromSelect _ -> Assert.Pass()
+    | other -> Assert.Fail($"Expected InsertFromSelect, got {other}")
+
+[<Test>]
 let ``CASE WHEN in select with comparison``() =
     let sql =
         select {
