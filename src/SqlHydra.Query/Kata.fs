@@ -228,12 +228,14 @@ module DistinctOnStore =
             let selectToken = "SELECT "
             let mutable depth = 0
             let mutable idx = -1
-            for i in 0 .. sql.Length - selectToken.Length do
+            for i in 0 .. sql.Length - 1 do
                 if idx < 0 then
                     match sql.[i] with
                     | '(' -> depth <- depth + 1
                     | ')' -> depth <- depth - 1
-                    | 'S' when depth = 0 && sql.Substring(i, selectToken.Length) = selectToken ->
+                    | 'S' when depth = 0
+                            && i + selectToken.Length <= sql.Length
+                            && String.CompareOrdinal(sql, i, selectToken, 0, selectToken.Length) = 0 ->
                         idx <- i
                     | _ -> ()
             if idx >= 0 then
@@ -315,7 +317,9 @@ module internal KataUtils =
                     let idx = processedSql.IndexOf('?')
                     if idx >= 0 then
                         processedSql <- processedSql.Substring(0, idx) + paramName + processedSql.Substring(idx + 1)
-                    bindings.Add(paramName, if isNull p then box System.DBNull.Value else p)
+                        bindings.Add(paramName, if isNull p then box System.DBNull.Value else p)
+                    else
+                        failwith $"setRaw: more parameters supplied than '?' placeholders in SQL: '{rawSql}'"
                 (col, UnsafeLiteral(processedSql) :> obj), bindings |> Seq.toList
             )
             |> List.unzip
@@ -414,12 +418,14 @@ type DeleteQuery<'T>(query: SqlKata.Query) =
 
 type UpdateQuery<'T, 'UpdateReturn>(spec: UpdateQuerySpec<'T, 'UpdateReturn>) =
     inherit SelectQuery()
+    let kataQuery = lazy (spec |> KataUtils.fromUpdate)
     member this.Spec = spec
-    member this.KataQuery = spec |> KataUtils.fromUpdate
-    override this.ToKataQuery() = this.KataQuery
+    member this.KataQuery = kataQuery.Value
+    override this.ToKataQuery() = kataQuery.Value
 
 type InsertQuery<'T, 'Identity>(spec: InsertQuerySpec<'T, 'Identity>) =
     inherit SelectQuery()
+    let kataQuery = lazy (spec |> KataUtils.fromInsert)
     member this.Spec = spec
-    member this.KataQuery = spec |> KataUtils.fromInsert
-    override this.ToKataQuery() = this.KataQuery
+    member this.KataQuery = kataQuery.Value
+    override this.ToKataQuery() = kataQuery.Value

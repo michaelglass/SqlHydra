@@ -810,11 +810,11 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                     | None ->
                         notImplMsg $"Anti-join pattern requires a record type with at least one field, but {innerType.Name} has none."
                     | Some firstField ->
-                    let fqCol = qualifyColumn p.Name (firstField :> MemberInfo)
-                    match exp.NodeType with
-                    | ExpressionType.Equal -> query.WhereNull(fqCol)
-                    | ExpressionType.NotEqual -> query.WhereNotNull(fqCol)
-                    | _ -> notImplMsg "Unsupported comparison on left-joined table parameter"
+                        let fqCol = qualifyColumn p.Name (firstField :> MemberInfo)
+                        match exp.NodeType with
+                        | ExpressionType.Equal -> query.WhereNull(fqCol)
+                        | ExpressionType.NotEqual -> query.WhereNotNull(fqCol)
+                        | _ -> notImplMsg "Unsupported comparison on left-joined table parameter"
                 | _ -> notImplMsg "Left-joined table parameter can only be compared to None"
 
             | NValue _, NValue _ ->
