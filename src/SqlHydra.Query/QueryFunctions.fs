@@ -119,3 +119,9 @@ module CaseWhenFunctions =
     /// Note: values are rendered as SQL literals, not parameters.
     /// Column references are properly qualified. Do not pass unsanitized user input.
     let caseWhen<'T> (condition: bool) (thenValue: 'T) (elseValue: 'T) : 'T = Unchecked.defaultof<'T>
+
+[<AutoOpen>]
+module ParamFunctions =
+    /// Injects an external F# value as a SQL parameter in a SELECT projection.
+    /// Use in INSERT ... SELECT to mix table columns with external values.
+    let inlineValue<'T> (value: 'T) : 'T = Unchecked.defaultof<'T>

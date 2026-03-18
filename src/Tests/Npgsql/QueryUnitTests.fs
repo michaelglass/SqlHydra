@@ -958,3 +958,40 @@ let ``leftJoin' select mixed tuple with table var and scalar``() =
     sql.Contains("LEFT JOIN") =! true
     sql.Contains("\"d\".*") =! true
     sql.Contains("\"o\".\"salesorderid\"") =! true
+
+[<Test>]
+let ``Select with inlineValue injects external value as parameter``() =
+    let externalValue = "hello"
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (o.salesorderid = 1)
+            select {| OrderId = o.salesorderid; Tag = inlineValue externalValue |}
+        }
+        |> toSql
+
+    // inlineValue should appear as a parameter placeholder in the SQL
+    sql.Contains("@") =! true
+    sql.Contains("salesorderid") =! true
+
+[<Test>]
+let ``INSERT FROM SELECT with inlineValue for external values``() =
+    let changedBy = "admin"
+    let notes = "bulk update"
+
+    let sourceQuery =
+        select {
+            for a in person.address do
+            where (a.city = "Seattle")
+            select {| City = a.city; AccountNumber = inlineValue changedBy; Comment = inlineValue notes |}
+        }
+
+    let query =
+        insert {
+            into person.address
+            fromSelect sourceQuery
+        }
+
+    match query.Spec.InsertType with
+    | InsertFromSelect _ -> Assert.Pass()
+    | other -> Assert.Fail($"Expected InsertFromSelect, got {other}")

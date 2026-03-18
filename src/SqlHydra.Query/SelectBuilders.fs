@@ -177,6 +177,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     q.Select($"%s{tableAlias}.%s{column}")
                 | LinqExpressionVisitors.SelectedExpression sqlFragment ->
                     q.SelectRaw(sqlFragment)
+                | LinqExpressionVisitors.SelectedParameter value ->
+                    q.SelectRaw("?", [| value |])
             ) state.Query
 
         QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)

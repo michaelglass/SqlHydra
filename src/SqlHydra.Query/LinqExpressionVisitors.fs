@@ -1060,6 +1060,7 @@ type Selection =
     | SelectedTable of tableAlias: string * tableType: Type
     | SelectedColumn of tableAlias: string * column: string * columnType: Type * isOpt: bool * isNullable: bool
     | SelectedExpression of sqlFragment: string
+    | SelectedParameter of value: obj
 
 
 /// Visits a join predicate expression and builds SqlKata Join.On() calls.
@@ -1222,6 +1223,9 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
             let alias = visitAlias p.Expression
             let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
             [ SelectedExpression $"{aggType}({fqCol})" ]
+        | NMethodCall(m, args) when m.Method.Name = "inlineValue" && args.Length = 1 ->
+            let value = compileAndEvaluateExpression m.Arguments.[0]
+            [ SelectedParameter value ]
         | NMethodCall(m, _) ->
             let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
             let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
