@@ -1517,3 +1517,22 @@ let ``anonymous record aliases column with different name``() =
     // Column name differs from field name: totaldue vs Total
     sql.Contains("\"o\".\"totaldue\" AS \"Total\"") =! true
 
+[<Test>]
+let ``subquery alias avoids parser ambiguity in whereNotExists``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            whereNotExists (
+                subquery {
+                    for d in sales.salesorderdetail do
+                    where (d.unitprice > 100m)
+                    select d.salesorderdetailid
+                }
+            )
+            select o
+        }
+        |> toSql
+
+    sql.Contains("NOT EXISTS (SELECT") =! true
+    sql.Contains("\"d\".\"unitprice\"") =! true
+

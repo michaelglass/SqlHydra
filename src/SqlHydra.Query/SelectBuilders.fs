@@ -933,6 +933,11 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
 let select<'Selected, 'Mapped> =
     SelectQueryBuilder<'Selected, 'Mapped>()
 
+/// Alias for `select` — use inside whereNotExists/whereExists to avoid F# CE parser ambiguity
+/// with the outer CE's `select` custom operation.
+let subquery<'Selected, 'Mapped> =
+    SelectQueryBuilder<'Selected, 'Mapped>()
+
 /// Builds a select query with a context source - returns an Async query result
 let inline selectAsync< ^Selected, ^Mapped, ^Context
     when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
