@@ -473,6 +473,13 @@ type SelectBuilder<'Selected, 'Mapped> () =
     member this.Distinct (state: QuerySource<'T, Query>) =
         QuerySource<'T, Query>(state.Query.Distinct(), state.TableMappings)
 
+    /// Applies an arbitrary transformation to the underlying SqlKata Query.
+    /// Use this as an escape hatch for SqlKata features not exposed by SqlHydra CE operations.
+    /// Example: queryTransform (fun q -> q.WhereRaw("embedding <-> ? < ?", vec, threshold).OrderByRaw("embedding <-> ?", vec))
+    [<CustomOperation("queryTransform", MaintainsVariableSpace = true)>]
+    member this.QueryTransform (state: QuerySource<'T, Query>, transform: Query -> Query) =
+        QuerySource<'T, Query>(transform state.Query, state.TableMappings)
+
     /// Sets a CancellationToken for the query execution.
     [<CustomOperation("cancel", MaintainsVariableSpace = true)>]
     member this.Cancel (state: QuerySource<'T, Query>, cancellationToken: CancellationToken) =
