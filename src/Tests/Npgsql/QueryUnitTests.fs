@@ -1268,3 +1268,72 @@ let ``groupBy multiple columns after leftJoin'``() =
     sql.Contains("GROUP BY") =! true
     sql.Contains("\"o\".\"customerid\"") =! true
     sql.Contains("\"o\".\"status\"") =! true
+
+[<Test>]
+let ``whereNotExists produces NOT EXISTS SQL``() =
+    let subquery =
+        select {
+            for d in sales.salesorderdetail do
+            where (d.salesorderid = 1)
+            select d.salesorderdetailid
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            whereNotExists subquery
+            select o
+        }
+        |> toSql
+
+    sql.Contains("NOT EXISTS") =! true
+
+[<Test>]
+let ``whereExists produces EXISTS SQL``() =
+    let subquery =
+        select {
+            for d in sales.salesorderdetail do
+            where (d.salesorderid = 1)
+            select d.salesorderdetailid
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            whereExists subquery
+            select o
+        }
+        |> toSql
+
+    sql.Contains("EXISTS") =! true
+    // Make sure it's not "NOT EXISTS"
+    let notExistsCount = System.Text.RegularExpressions.Regex.Matches(sql, "NOT EXISTS").Count
+    notExistsCount =! 0
+
+[<Test>]
+let ``multiple whereNotExists``() =
+    let sub1 =
+        select {
+            for d in sales.salesorderdetail do
+            where (d.unitprice > 100m)
+            select d.salesorderdetailid
+        }
+
+    let sub2 =
+        select {
+            for c in sales.customer do
+            where (c.customerid > 1000)
+            select c.customerid
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            whereNotExists sub1
+            whereNotExists sub2
+            select o
+        }
+        |> toSql
+
+    let count = System.Text.RegularExpressions.Regex.Matches(sql, "NOT EXISTS").Count
+    count =! 2

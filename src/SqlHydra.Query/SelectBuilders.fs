@@ -151,6 +151,16 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let where = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression qualifyColumnWithAlias
         QuerySource<'T, Query>(query.Where(fun w -> where), state.TableMappings)
 
+    /// WHERE NOT EXISTS (subquery)
+    [<CustomOperation("whereNotExists", MaintainsVariableSpace = true)>]
+    member this.WhereNotExists (state: QuerySource<'T, Query>, subquery: SelectQuery) =
+        QuerySource<'T, Query>(state.Query.WhereNotExists(subquery.ToKataQuery()), state.TableMappings)
+
+    /// WHERE EXISTS (subquery)
+    [<CustomOperation("whereExists", MaintainsVariableSpace = true)>]
+    member this.WhereExists (state: QuerySource<'T, Query>, subquery: SelectQuery) =
+        QuerySource<'T, Query>(state.Query.WhereExists(subquery.ToKataQuery()), state.TableMappings)
+
     /// Sets the SELECT statement and filters the query to include only the selected tables
     [<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
     member this.Select (state: QuerySource<'T, Query>, [<ProjectionParameter>] selectExpression: Expression<Func<'T, 'Selected>>) =
