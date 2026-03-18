@@ -1456,3 +1456,59 @@ let ``CTE can be used as leftJoin' source``() =
     sql.Contains("LEFT JOIN") =! true
     // Should NOT contain ".order_stats" (empty schema prefix)
     sql.Contains("\".\"order_stats\"") =! false
+
+[<Test>]
+let ``countDistinct in select produces COUNT(DISTINCT col)``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            select (o.salesorderid, countDistinct d.salesorderdetailid)
+        }
+        |> toSql
+
+    sql.Contains("COUNT(DISTINCT") =! true
+
+[<Test>]
+let ``countDistinct in having``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            having (countDistinct d.salesorderdetailid > 5)
+            select o.salesorderid
+        }
+        |> toSql
+
+    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("HAVING") =! true
+
+[<Test>]
+let ``havingRaw produces raw HAVING clause``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            havingRaw "COUNT(DISTINCT \"d\".\"salesorderdetailid\") > 5"
+            select o.salesorderid
+        }
+        |> toSql
+
+    sql.Contains("HAVING") =! true
+    sql.Contains("COUNT(DISTINCT") =! true
+
+[<Test>]
+let ``orderByRaw produces raw ORDER BY``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            orderByRaw "open_rate DESC"
+            select o
+        }
+        |> toSql
+
+    sql.Contains("ORDER BY") =! true
+    sql.Contains("open_rate DESC") =! true

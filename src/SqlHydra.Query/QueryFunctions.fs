@@ -109,6 +109,9 @@ module Aggregates =
     /// Gets the AVG of the given column and returns 'Result.
     let avgByAs<'P, 'Result when 'P : struct and 'Result : struct> (prop: 'P) : 'Result = Unchecked.defaultof<'Result>
 
+    /// Gets the COUNT of DISTINCT values of the given column
+    let countDistinct (prop: 'P) = Unchecked.defaultof<int>
+
 [<AutoOpen>]
 module SqlFunctions =
 

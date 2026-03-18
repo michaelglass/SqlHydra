@@ -270,13 +270,16 @@ module SqlPatterns =
 
     let (|AggregateColumn|_|) (exp: Expression) =
         match exp with
-        | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs ] ->
-            let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+        | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
+            let aggType =
+                if m.Method.Name = nameof countDistinct then "COUNTDISTINCT"
+                else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
             | _ -> notImplMsg "Invalid argument to aggregate function."
         | _ -> None
 
+<<<<<<< HEAD
 // ─── NormalizedExpression Patterns ───────────────────────────────────────────
 // Active patterns on NormalizedExpression that delegate to existing Expression
 // patterns for semantic checks. No semantic logic is duplicated.
@@ -372,11 +375,13 @@ module NormalizedPatterns =
             with _ -> None
         | _ -> None
 
-    /// Aggregate column pattern (minBy, maxBy, sumBy, avgBy, countBy, avgByAs).
+    /// Aggregate column pattern (minBy, maxBy, sumBy, avgBy, countBy, avgByAs, countDistinct).
     let (|NAggregateColumn|_|) (nexp: NormalizedExpression) =
         match nexp with
-        | NMethodCall(m, _) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs ] ->
-            let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+        | NMethodCall(m, _) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
+            let aggType =
+                if m.Method.Name = nameof countDistinct then "COUNTDISTINCT"
+                else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
             | _ -> notImplMsg "Invalid argument to aggregate function."
@@ -399,6 +404,11 @@ module NormalizedPatterns =
             | ArrayInit values -> Some values
             | _ -> None
         | _ -> None
+
+    /// Renders an aggregate SQL fragment, handling COUNTDISTINCT specially.
+    let renderAggregate aggType fqCol =
+        if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT %s{fqCol})"
+        else $"%s{aggType}(%s{fqCol})"
 
 let getComparison (expType: ExpressionType) =
     match expType with
@@ -941,11 +951,12 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                 let rt =
                     let alias = visitAlias p2.Expression
                     qualifyColumn alias p2.Member
-                query.HavingRaw($"{aggType}({lt}) {comparison} {rt}")
+                query.HavingRaw($"{renderAggregate aggType lt} {comparison} {rt}")
             | NAggregateColumn (aggType, (p, _)), NValue value ->
+                // Handle aggregate column to value comparisons
                 let alias = visitAlias p.Expression
                 let lt = qualifyColumn alias p.Member
-                query.HavingRaw($"{aggType}({lt}) {comparison} ?", [value])
+                query.HavingRaw($"{renderAggregate aggType lt} {comparison} ?", [value])
             | NColumn (p1, _), NColumn (p2, _) ->
                 let lt =
                     let alias = visitAlias p1.Expression
@@ -1235,7 +1246,7 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
         | NAggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
-            [ SelectedExpression $"{aggType}({fqCol})" ]
+            [ SelectedExpression (renderAggregate aggType fqCol) ]
         | NMethodCall(m, args) when m.Method.Name = "inlineValue" && args.Length = 1 ->
             let value = compileAndEvaluateExpression m.Arguments.[0]
             [ SelectedParameter value ]
@@ -1561,7 +1572,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         | AggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             let fqCol = $"[{alias}].[{p.Member.Name}]" // NOTE: SqlKata will translate [ ] to proper quoting for the target dialect.
-            let sqlFragment = $"{aggType}({fqCol})"
+            let sqlFragment = renderAggregate aggType fqCol
             let exprAlias = $"__hydra_expr_{!sqlExprCounter}"
             sqlExprCounter := !sqlExprCounter + 1
             let key = $"__sqlfn:{sqlFragment}"

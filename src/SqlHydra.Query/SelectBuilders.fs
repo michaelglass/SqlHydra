@@ -230,30 +230,32 @@ type SelectBuilder<'Selected, 'Mapped> () =
                 | LinqExpressionVisitors.OrderByColumn (tableAlias, p) -> 
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
                     state.Query.OrderBy(fqCol)
-                | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) -> 
+                | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
-                    state.Query.OrderByRaw($"%s{aggType}(%s{fqCol})")
-                | LinqExpressionVisitors.OrderByIgnored -> 
+                    let aggFragment = if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT %s{fqCol})" else $"%s{aggType}(%s{fqCol})"
+                    state.Query.OrderByRaw(aggFragment)
+                | LinqExpressionVisitors.OrderByIgnored ->
                     state.Query
         QuerySource<'T, Query>(orderedQuery, state.TableMappings)
 
     /// Sets the ORDER BY for single column
     [<CustomOperation("thenBy", MaintainsVariableSpace = true)>]
-    member this.ThenBy (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) = 
+    member this.ThenBy (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
         this.OrderBy(state, propertySelector)
 
     /// Sets the ORDER BY DESC for single column
     [<CustomOperation("orderByDescending", MaintainsVariableSpace = true)>]
-    member this.OrderByDescending (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) = 
-        let orderedQuery = 
+    member this.OrderByDescending (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
+        let orderedQuery =
             LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
-            |> function 
-                | LinqExpressionVisitors.OrderByColumn (tableAlias, p) -> 
+            |> function
+                | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
                     state.Query.OrderByDesc(fqCol)
-                | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) -> 
+                | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
-                    state.Query.OrderByRaw($"%s{aggType}(%s{fqCol}) DESC")
+                    let aggFragment = if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT %s{fqCol})" else $"%s{aggType}(%s{fqCol})"
+                    state.Query.OrderByRaw($"%s{aggFragment} DESC")
                 | LinqExpressionVisitors.OrderByIgnored -> 
                     state.Query
         QuerySource<'T, Query>(orderedQuery, state.TableMappings)
@@ -489,10 +491,20 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     /// Sets the HAVING condition.
     [<CustomOperation("having", MaintainsVariableSpace = true)>]
-    member this.Having (state: QuerySource<'T, Query>, [<ProjectionParameter>] havingExpression) = 
+    member this.Having (state: QuerySource<'T, Query>, [<ProjectionParameter>] havingExpression) =
         let tableMappings = state.TableMappings |> Map.values
         let having = LinqExpressionVisitors.visitHaving<'T> tableMappings havingExpression qualifyColumnWithAlias
         QuerySource<'T, Query>(state.Query.Having(fun w -> having), state.TableMappings)
+
+    /// Sets a raw HAVING clause.
+    [<CustomOperation("havingRaw", MaintainsVariableSpace = true)>]
+    member this.HavingRaw (state: QuerySource<'T, Query>, rawSql: string) =
+        QuerySource<'T, Query>(state.Query.HavingRaw(rawSql), state.TableMappings)
+
+    /// Sets a raw ORDER BY clause.
+    [<CustomOperation("orderByRaw", MaintainsVariableSpace = true)>]
+    member this.OrderByRaw (state: QuerySource<'T, Query>, rawSql: string) =
+        QuerySource<'T, Query>(state.Query.OrderByRaw(rawSql), state.TableMappings)
 
     /// Sets query to return DISTINCT values
     [<CustomOperation("distinct", MaintainsVariableSpace = true)>]
