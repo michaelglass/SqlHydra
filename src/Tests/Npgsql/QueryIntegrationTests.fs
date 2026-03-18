@@ -1013,3 +1013,23 @@ let ``Select with DISTINCT ON``() = task {
     let uniqueCustomerIds = customerIds |> List.distinct
     Assert.AreEqual(customerIds.Length, uniqueCustomerIds.Length, "DISTINCT ON should return one row per customer")
 }
+
+[<Test>]
+let ``CTE with anonymous record``() = task {
+    let onlineOrders =
+        select {
+            for o in sales.salesorderheader do
+            where o.onlineorderflag
+            select {| customerid = o.customerid; totaldue = o.totaldue |}
+        }
+
+    let! results =
+        selectTask db {
+            for r in cte "online_orders" onlineOrders do
+            select r.customerid
+            take 10
+        }
+
+    gt0 results
+    Assert.IsTrue(results |> Seq.forall (fun id -> id > 0), "All customer IDs should be > 0")
+}
