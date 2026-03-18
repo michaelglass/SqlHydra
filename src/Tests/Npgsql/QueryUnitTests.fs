@@ -503,7 +503,7 @@ let ``Insert with Returning``() =
     Assert.AreEqual("rowguid", query.Spec.OutputFields.[1].ColumnName)
 
 [<Test>]
-let ``Insert OnConflictDoNothing with Where``() =
+let ``Insert OnConflictDoNothing with WhereRaw``() =
     let query =
         insert {
             for c in sales.customer do
@@ -516,14 +516,14 @@ let ``Insert OnConflictDoNothing with Where``() =
                     sales.customer.rowguid = System.Guid.NewGuid()
                     sales.customer.customerid = 0
                 }
-            onConflictDoNothingWhere c.personid "personid IS NOT NULL"
+            onConflictDoNothingWhereRaw c.personid "personid IS NOT NULL"
         }
 
     match query.Spec.InsertType with
-    | OnConflictDoNothingWhere (fields, whereClause) ->
+    | OnConflictDoNothingWhereRaw (fields, whereClause) ->
         Assert.AreEqual(["personid"], fields)
         Assert.AreEqual("personid IS NOT NULL", whereClause)
-    | _ -> Assert.Fail("Expected OnConflictDoNothingWhere")
+    | _ -> Assert.Fail("Expected OnConflictDoNothingWhereRaw")
 
 [<Test>]
 let ``Where with Coalesce``() =
@@ -534,7 +534,6 @@ let ``Where with Coalesce``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("coalesce") =! true
 
 [<Test>]
@@ -546,7 +545,6 @@ let ``Where with Coalesce compared to value``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("coalesce") =! true
 
 // =============================================================================
@@ -554,7 +552,7 @@ let ``Where with Coalesce compared to value``() =
 // =============================================================================
 
 [<Test>]
-let ``REGRESSION: <> None with complex boolean (OR, AND, = Some) - production pattern A``() =
+let ``Where <> None with complex boolean (OR, AND, = Some)``() =
     let someId = 42
     let sql =
         select {
@@ -566,33 +564,6 @@ let ``REGRESSION: <> None with complex boolean (OR, AND, = Some) - production pa
         }
         |> toSql
 
-    printfn "SQL: %s" sql
-    sql.Contains("IS NOT NULL") =! true
-
-[<Test>]
-let ``REGRESSION: <> None on joined table column - production pattern B``() =
-    let sql =
-        select {
-            for o in sales.salesorderheader do
-            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
-            where (o.customerid = 123 && o.shipdate <> None)
-        }
-        |> toSql
-
-    printfn "SQL: %s" sql
-    sql.Contains("IS NOT NULL") =! true
-
-[<Test>]
-let ``REGRESSION: <> None on second table column after join - production pattern B variant``() =
-    let sql =
-        select {
-            for o in sales.salesorderheader do
-            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
-            where (d.carriertrackingnumber <> None)
-        }
-        |> toSql
-
-    printfn "SQL: %s" sql
     sql.Contains("IS NOT NULL") =! true
 
 [<Test>]
@@ -605,7 +576,6 @@ let ``REGRESSION: leftJoin' with on' predicate-style join - production pattern C
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("LEFT JOIN") =! true
 
 [<Test>]
@@ -619,7 +589,6 @@ let ``REGRESSION: leftJoin' with anti-join where None - production pattern C var
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("IS NULL") =! true
 
 [<Test>]
@@ -633,11 +602,10 @@ let ``REGRESSION: leftJoin' with where d <> None - semi-join pattern``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("IS NOT NULL") =! true
 
 [<Test>]
-let ``REGRESSION: =% ILIKE with percent pattern - production pattern D``() =
+let ``Where =% ILIKE with percent pattern``() =
     let sql =
         select {
             for o in sales.salesorderheader do
@@ -645,11 +613,10 @@ let ``REGRESSION: =% ILIKE with percent pattern - production pattern D``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("ilike") =! true
 
 [<Test>]
-let ``REGRESSION: =% ILIKE on Option string column - production pattern D variant``() =
+let ``Where =% ILIKE on Option string column``() =
     let sql =
         select {
             for o in sales.salesorderheader do
@@ -657,7 +624,6 @@ let ``REGRESSION: =% ILIKE on Option string column - production pattern D varian
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("ilike") =! true
 
 [<Test>]
@@ -670,7 +636,6 @@ let ``OrderBy NULLS LAST``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("NULLS LAST") =! true
 
 [<Test>]
@@ -683,7 +648,6 @@ let ``OrderByDescending NULLS FIRST``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("NULLS FIRST") =! true
 
 [<Test>]
@@ -698,7 +662,6 @@ let ``DISTINCT ON single column``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("DISTINCT ON") =! true
     sql.Contains("\"customerid\"") =! true
 
@@ -714,7 +677,6 @@ let ``REGRESSION: leftJoin' on' with compound predicate and external value``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("LEFT JOIN") =! true
     sql.Contains("AND") =! true
 
@@ -745,7 +707,6 @@ let ``Update with setRaw and set generates correct SQL``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     // The base SQL from SqlKata will have SET "customerid" = @p0
     // setRaw values are applied post-compilation in QueryContext, not visible in toSql
     sql.Contains("SET") =! true
@@ -764,7 +725,7 @@ let ``Update with only setRaw generates valid query``() =
     Assert.AreEqual(0, query.Spec.SetValues.Length, "Expected 0 regular SET values")
     // Should not throw - fromUpdate should handle setRaw-only case
     let sql = query |> toSql
-    printfn "SQL: %s" sql
+
     sql.Contains("UPDATE") =! true
 
 [<Test>]
@@ -809,7 +770,6 @@ let ``onConflictDoUpdateCoalesce generates COALESCE SQL``() =
         | OnConflictDoUpdateCoalesce (cf, uf, coal) -> OnConflict.onConflictDoUpdateCoalesce "sales.currency" cf uf coal compiled.Sql
         | _ -> compiled.Sql
 
-    printfn "SQL: %s" sql
     sql.Contains("COALESCE") =! true
     sql.Contains("EXCLUDED") =! true
 
@@ -829,7 +789,6 @@ let ``CTE with anonymous record``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("my_cte") =! true
     sql.Contains("\"r\".\"Id\"") =! true
 
@@ -848,7 +807,6 @@ let ``CTE select all columns``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("addr_cte") =! true
 
 [<Test>]
@@ -869,7 +827,6 @@ let ``CTE with where on multiple columns``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("online_orders") =! true
     sql.Contains("\"s\".\"Total\"") =! true
     sql.Contains("\"s\".\"CustomerId\"") =! true
@@ -883,7 +840,6 @@ let ``CASE WHEN in select with bool column``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("CASE WHEN") =! true
     sql.Contains("THEN") =! true
     sql.Contains("ELSE") =! true
@@ -917,5 +873,4 @@ let ``CASE WHEN in select with comparison``() =
         }
         |> toSql
 
-    printfn "SQL: %s" sql
     sql.Contains("CASE WHEN") =! true

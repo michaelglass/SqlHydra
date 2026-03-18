@@ -21,13 +21,7 @@ let toSql (query: SqlHydra.Query.SelectQuery) =
     let kataQuery = query.ToKataQuery()
     let compiled = compiler.Compile(kataQuery)
     // Apply PostgreSQL DISTINCT ON if present
-    match SqlHydra.Query.DistinctOnStore.tryTake kataQuery with
-    | Some columns ->
-        let distinctOnCsv = columns |> String.concat ", "
-        let idx = compiled.Sql.IndexOf("SELECT ")
-        if idx >= 0 then
-            compiled.Sql <- compiled.Sql.Insert(idx + 7, $"DISTINCT ON ({distinctOnCsv}) ")
-    | None -> ()
+    compiled.Sql <- SqlHydra.Query.DistinctOnStore.applyToSql kataQuery compiled.Sql
     #if DEBUG
     printfn "toSql: %s" compiled.Sql
     #endif

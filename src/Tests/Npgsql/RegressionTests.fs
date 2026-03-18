@@ -456,7 +456,7 @@ let ``Regression: =% ILIKE operator``() = task {
 }
 
 [<Test>]
-let ``Regression: onConflictDoNothingWhere with returning``() = task {
+let ``Regression: onConflictDoNothingWhereRaw with returning``() = task {
     use! shared = db.OpenContextAsync()
     shared.BeginTransaction()
 
@@ -476,7 +476,7 @@ let ``Regression: onConflictDoNothingWhere with returning``() = task {
         insertTask shared {
             for e in ``public``.test_events do
             entity event1
-            onConflictDoNothingWhere e.email_event_id "email_event_id IS NOT NULL"
+            onConflictDoNothingWhereRaw e.email_event_id "email_event_id IS NOT NULL"
             returning e.id
         }
 
@@ -488,7 +488,7 @@ let ``Regression: onConflictDoNothingWhere with returning``() = task {
         insertTask shared {
             for e in ``public``.test_events do
             entity event2
-            onConflictDoNothingWhere e.email_event_id "email_event_id IS NOT NULL"
+            onConflictDoNothingWhereRaw e.email_event_id "email_event_id IS NOT NULL"
             returning e.id
         }
 

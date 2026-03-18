@@ -862,7 +862,7 @@ let ``leftJoin' on' with compound predicate and captured variable``() = task {
 }
 
 [<Test>]
-let ``Insert onConflictDoNothingWhere``() = task {
+let ``Insert onConflictDoNothingWhereRaw``() = task {
     use! shared = db.OpenContextAsync()
     shared.BeginTransaction()
 
@@ -880,12 +880,12 @@ let ``Insert onConflictDoNothingWhere``() = task {
         }
     result1 =! 1
 
-    // Second insert with onConflictDoNothingWhere should be silently ignored
+    // Second insert with onConflictDoNothingWhereRaw should be silently ignored
     let! result2 =
         insertTask shared {
             for c in sales.currency do
             entity currency
-            onConflictDoNothingWhere c.currencycode "TRUE"
+            onConflictDoNothingWhereRaw c.currencycode "TRUE"
         }
     // Conflict handled gracefully — 0 rows affected
     Assert.GreaterOrEqual(result2, 0)

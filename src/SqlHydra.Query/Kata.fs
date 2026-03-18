@@ -93,7 +93,7 @@ type InsertType =
     | OnConflictDoUpdate of conflictFields: string list * updateFields: string list
     | OnConflictDoUpdateCoalesce of conflictFields: string list * updateFields: string list * coalesceFields: string list
     | OnConflictDoNothing of conflictFields: string list
-    | OnConflictDoNothingWhere of conflictFields: string list * whereClause: string
+    | OnConflictDoNothingWhereRaw of conflictFields: string list * whereClause: string
     | InsertOrUpdateOnUnique of keyFields: string list * updateFields: string list
     | InsertFromSelect of selectQuery: SqlKata.Query
 
@@ -198,6 +198,17 @@ module DistinctOnStore =
             store.Remove(query) |> ignore
             Some cols
         | false, _ -> None
+
+    /// Applies DISTINCT ON to compiled SQL if present
+    let applyToSql (query: SqlKata.Query) (sql: string) =
+        match tryTake query with
+        | Some columns ->
+            let distinctOnCsv = columns |> String.concat ", "
+            let idx = sql.IndexOf("SELECT ")
+            if idx >= 0 then
+                sql.Insert(idx + 7, $"DISTINCT ON ({distinctOnCsv}) ")
+            else sql
+        | None -> sql
 
 /// Stores CTE query definitions by alias for pickup during For binding.
 module CteQueryStore =
@@ -339,7 +350,7 @@ module internal KataUtils =
         | Some ident, OnConflictDoUpdate (conflictFields, _)
         | Some ident, OnConflictDoUpdateCoalesce (conflictFields, _, _)
         | Some ident, OnConflictDoNothing conflictFields
-        | Some ident, OnConflictDoNothingWhere (conflictFields, _)
+        | Some ident, OnConflictDoNothingWhereRaw (conflictFields, _)
         | Some ident, InsertOrUpdateOnUnique (conflictFields, _) ->
             if conflictFields |> List.contains ident
             then failwith $"Using identity column as a conflict target is not supported."

@@ -158,13 +158,8 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     member this.BuildCommand(query: Query) =
         let compiledQuery = compiler.Compile(query)
         // Apply PostgreSQL DISTINCT ON if present
-        match DistinctOnStore.tryTake query with
-        | Some columns when provider = Npgsql ->
-            let distinctOnCsv = columns |> String.concat ", "
-            let idx = compiledQuery.Sql.IndexOf("SELECT ")
-            if idx >= 0 then
-                compiledQuery.Sql <- compiledQuery.Sql.Insert(idx + 7, $"DISTINCT ON ({distinctOnCsv}) ")
-        | _ -> ()
+        if provider = Npgsql then
+            compiledQuery.Sql <- DistinctOnStore.applyToSql query compiledQuery.Sql
         this.BuildCommand(compiledQuery)
 
     /// Returns an ADO.NET data reader for a given query.
@@ -293,7 +288,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             | OnConflictDoUpdate (conflictFields, updateFields) -> OnConflict.onConflictDoUpdate conflictFields updateFields
             | OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) -> OnConflict.onConflictDoUpdateCoalesce iq.Spec.Table conflictFields updateFields coalesceFields
             | OnConflictDoNothing conflictFields -> OnConflict.onConflictDoNothing conflictFields
-            | OnConflictDoNothingWhere (conflictFields, whereClause) -> OnConflict.onConflictDoNothingWhere conflictFields whereClause
+            | OnConflictDoNothingWhereRaw (conflictFields, whereClause) -> OnConflict.onConflictDoNothingWhereRaw conflictFields whereClause
             | Insert -> id
             | InsertOrUpdateOnUnique _ -> id // handled above
             | InsertFromSelect _ -> id
