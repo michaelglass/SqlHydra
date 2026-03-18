@@ -184,3 +184,17 @@ type SelectBuilder<'Selected, 'Mapped> with
             | _ -> failwith "NULLS FIRST does not support aggregate columns"
         QuerySource<'T, Query>(orderedQuery, state.TableMappings)
 
+    /// LEFT JOIN LATERAL (subquery) AS alias ON true (PostgreSQL only).
+    /// The subquery typically correlates with the outer query via WhereRaw in kata.
+    [<CustomOperation("lateralJoin", MaintainsVariableSpace = true)>]
+    member this.LateralJoin (state: QuerySource<'T, Query>, innerQuery: SelectQuery, alias: string) =
+        let subquery = innerQuery.ToKataQuery()
+        subquery.As(alias) |> ignore
+        let updatedQuery =
+            state.Query.Join(
+                subquery,
+                (fun (j: SqlKata.Join) -> j.WhereRaw("true")),
+                "left join lateral"
+            )
+        QuerySource<'T, Query>(updatedQuery, state.TableMappings)
+

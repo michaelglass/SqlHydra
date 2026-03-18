@@ -1184,3 +1184,26 @@ let ``LEFT JOIN LATERAL via kata``() =
     printfn "LATERAL SQL: %s" sql
     sql.Contains("LEFT JOIN LATERAL") =! true
     sql.Contains("detail_count") =! true
+
+[<Test>]
+let ``lateralJoin produces LEFT JOIN LATERAL SQL``() =
+    let innerQuery =
+        select {
+            for d in sales.salesorderdetail do
+            kata (fun q -> q.WhereRaw("\"d\".\"salesorderid\" = \"o\".\"salesorderid\"")
+                            .SelectRaw("SUM(\"d\".\"unitprice\") as total_price"))
+            select d
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin innerQuery "order_totals"
+            select o
+        }
+        |> toSql
+
+    printfn "lateralJoin SQL: %s" sql
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    sql.Contains("order_totals") =! true
+    sql.Contains("total_price") =! true
