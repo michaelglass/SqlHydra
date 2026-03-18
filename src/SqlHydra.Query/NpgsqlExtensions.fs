@@ -188,7 +188,7 @@ type SelectBuilder<'Selected, 'Mapped> with
     /// The subquery typically correlates with the outer query via WhereRaw in kata.
     [<CustomOperation("lateralJoin", MaintainsVariableSpace = true)>]
     member this.LateralJoin (state: QuerySource<'T, Query>, innerQuery: SelectQuery, alias: string) =
-        let subquery = innerQuery.ToKataQuery()
+        let subquery = innerQuery.ToKataQuery().Clone()
         subquery.As(alias) |> ignore
         let updatedQuery =
             state.Query.Join(
