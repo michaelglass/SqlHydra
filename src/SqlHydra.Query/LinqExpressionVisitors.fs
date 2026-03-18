@@ -279,7 +279,6 @@ module SqlPatterns =
             | _ -> notImplMsg "Invalid argument to aggregate function."
         | _ -> None
 
-<<<<<<< HEAD
 // ─── NormalizedExpression Patterns ───────────────────────────────────────────
 // Active patterns on NormalizedExpression that delegate to existing Expression
 // patterns for semantic checks. No semantic logic is duplicated.
@@ -1083,8 +1082,8 @@ let visitPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Pro
 type Selection =
     | SelectedTable of tableAlias: string * tableType: Type
     | SelectedColumn of tableAlias: string * column: string * columnType: Type * isOpt: bool * isNullable: bool
-    | SelectedExpression of sqlFragment: string
-    | SelectedParameter of value: obj
+    | SelectedExpression of sqlFragment: string * alias: string option
+    | SelectedParameter of value: obj * alias: string option
 
 
 /// Visits a join predicate expression and builds SqlKata Join.On() calls.
@@ -1168,8 +1167,39 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
 
 /// Returns a list of one or more fully qualified table names: ["{schema}.{table}"]
 let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
+    // Map from parameter name to pre-computed selections (for Invoke substitution in anonymous record patterns)
+    let paramSubstitutions = System.Collections.Generic.Dictionary<string, Selection list>()
     let rec visit (nexp: NormalizedExpression) : Selection list =
         match nexp with
+        | NMethodCall(m, args) when m.Method.Name = "Invoke" ->
+            // When invoking a lambda, check if arguments resolve to scalar selections.
+            // F# anonymous records in join contexts compile as nested Invoke chains:
+            //   (fun fieldName -> New AnonRecord(..., fieldName)).Invoke(o.column)
+            // We only substitute parameters whose arguments resolve to scalar selections.
+            match m.Object with
+            | :? LambdaExpression as lam when lam.Parameters.Count = args.Length ->
+                let isScalarType (t: System.Type) =
+                    let unwrapped =
+                        if t.IsGenericType && (t.GetGenericTypeDefinition() = typedefof<Option<_>> || t.GetGenericTypeDefinition() = typedefof<System.Nullable<_>>) then
+                            t.GetGenericArguments().[0]
+                        else t
+                    unwrapped.IsPrimitive || unwrapped.IsValueType || unwrapped = typeof<string> || unwrapped = typeof<decimal>
+                let argResults =
+                    [| for i in 0 .. lam.Parameters.Count - 1 do
+                        let paramType = lam.Parameters.[i].Type
+                        let isScalar = isScalarType paramType
+                        let argSels = if isScalar then visit args.[i] else []
+                        yield (lam.Parameters.[i].Name, argSels, isScalar) |]
+                for (paramName, argSels, isScalar) in argResults do
+                    if isScalar then
+                        paramSubstitutions.[paramName] <- argSels
+                let result = visit (ExpressionNormalizer.toNormalizedExpression (lam.Body :> Expression))
+                for (paramName, _, isScalar) in argResults do
+                    if isScalar then
+                        paramSubstitutions.Remove(paramName) |> ignore
+                result
+            | _ ->
+                visit args.[0]
         | NMethodCall(m, args) when m.Method.Name = "Some" ->
             visit args.[0]
         // Handle direct OptionModule.Map calls
@@ -1242,22 +1272,62 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
             else
                 let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
                 let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
-                [ SelectedExpression sqlFragment ]
+                [ SelectedExpression (sqlFragment, None) ]
         | NAggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
-            [ SelectedExpression (renderAggregate aggType fqCol) ]
+            [ SelectedExpression (renderAggregate aggType fqCol, None) ]
         | NMethodCall(m, args) when m.Method.Name = "inlineValue" && args.Length = 1 ->
             let value = compileAndEvaluateExpression m.Arguments.[0]
-            [ SelectedParameter value ]
+            [ SelectedParameter (value, None) ]
         | NMethodCall(m, _) ->
+            // Treat any other method call as a SQL function
             let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
             let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
-            [ SelectedExpression sqlFragment ]
-        | NNew(_, args) ->
-            args |> List.collect visit
+            [ SelectedExpression (sqlFragment, None) ]
+        | NNew(n, args) ->
+            // Detect whether this is a tuple type (System.Tuple, System.ValueTuple) which should NOT get aliases
+            let isTupleType =
+                let t = n.Type
+                t.Namespace = "System" && (t.Name.StartsWith("Tuple") || t.Name.StartsWith("ValueTuple"))
+            // Get member names: from Members (C# anonymous types) or constructor parameters (F# anonymous records)
+            let memberNames =
+                if isTupleType then
+                    Array.create args.Length None
+                elif n.Members <> null && n.Members.Count = args.Length then
+                    n.Members |> Seq.map (fun m -> Some m.Name) |> Seq.toArray
+                else
+                    let ctorParams = n.Constructor.GetParameters()
+                    if ctorParams.Length = args.Length && ctorParams.Length > 0 then
+                        ctorParams |> Array.map (fun p -> Some p.Name)
+                    else
+                        Array.create args.Length None
+            if memberNames |> Array.exists Option.isSome then
+                // Named constructor (anonymous record or named type) — attach field names as aliases
+                Seq.zip args memberNames
+                |> Seq.map (fun (arg, nameOpt) ->
+                    let selections = visit arg
+                    match nameOpt with
+                    | None -> selections
+                    | Some name ->
+                        selections |> List.map (fun sel ->
+                            match sel with
+                            | SelectedExpression (frag, _) ->
+                                SelectedExpression ($"{frag} AS \"{name}\"", Some name)
+                            | SelectedParameter (v, _) ->
+                                SelectedParameter (v, Some name)
+                            | SelectedColumn (tblAlias, col, colType, isOpt, isNullable) when col <> name ->
+                                SelectedExpression ($"\"{tblAlias}\".\"{col}\" AS \"{name}\"", Some name)
+                            | other -> other
+                        )
+                )
+                |> Seq.toList |> List.concat
+            else
+                args |> List.collect visit
         | NParameter p ->
-            [ SelectedTable (p.Name, p.Type) ]
+            match paramSubstitutions.TryGetValue(p.Name) with
+            | true, selections -> selections
+            | _ -> [ SelectedTable (p.Name, p.Type) ]
         | NMemberAccess(inner, m) ->
             if m.Member.DeclaringType |> isOptionOrNullableType then
                 visit inner

@@ -185,10 +185,12 @@ type SelectBuilder<'Selected, 'Mapped> () =
                 | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
                     // Select a single column
                     q.Select($"%s{tableAlias}.%s{column}")
-                | LinqExpressionVisitors.SelectedExpression sqlFragment ->
+                | LinqExpressionVisitors.SelectedExpression (sqlFragment, _) ->
                     q.SelectRaw(sqlFragment)
-                | LinqExpressionVisitors.SelectedParameter value ->
-                    q.SelectRaw("?", [| value |])
+                | LinqExpressionVisitors.SelectedParameter (value, aliasOpt) ->
+                    match aliasOpt with
+                    | Some alias -> q.SelectRaw($"? AS \"{alias}\"", [| value |])
+                    | None -> q.SelectRaw("?", [| value |])
             ) state.Query
 
         QuerySource<'Selected, Query>(queryWithSelectedColumns, state.TableMappings)

@@ -1490,3 +1490,30 @@ let ``countDistinct in having``() =
     sql.Contains("COUNT(DISTINCT") =! true
     sql.Contains("salesorderdetailid") =! true
 
+[<Test>]
+let ``anonymous record aliases aggregate expressions``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            select {| OrderId = o.salesorderid; ItemCount = countDistinct d.salesorderdetailid |}
+        }
+        |> toSql
+
+    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("AS \"ItemCount\"") =! true
+    sql.Contains("\"o\".\"salesorderid\" AS \"OrderId\"") =! true
+
+[<Test>]
+let ``anonymous record aliases column with different name``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| Total = o.totaldue |}
+        }
+        |> toSql
+
+    // Column name differs from field name: totaldue vs Total
+    sql.Contains("\"o\".\"totaldue\" AS \"Total\"") =! true
+
