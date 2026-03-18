@@ -79,6 +79,13 @@ module ContextUtils =
         | Shared ctx ->             
             ctx |> tryOpen |> Task.FromResult
 
+    let getContextSync ct : QueryContext =
+        match ct with
+        | Create create -> create() |> tryOpen
+        | Shared ctx -> ctx |> tryOpen
+        | CreateTask _ -> failwith "selectSync does not support async context factories. Use a QueryContext or unit -> QueryContext."
+        | CreateAsync _ -> failwith "selectSync does not support async context factories. Use a QueryContext or unit -> QueryContext."
+
     let disposeIfNotShared ct (ctx: QueryContext) =
         match ct with
         | Create _ -> (ctx :> IDisposable).Dispose()
@@ -911,6 +918,134 @@ type SelectAsyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
         }
 
 
+/// A select builder that returns a synchronous result.
+type SelectSyncBuilder<'Selected, 'Mapped> (ct: ContextType) =
+    inherit SelectBuilder<'Selected, 'Mapped>()
+
+    member this.RunSelected(query: Query, resultModifier) =
+        let ctx = ContextUtils.getContextSync ct
+        try
+            use cmd = ctx.BuildCommand(query)
+            use reader = cmd.ExecuteReader()
+            let readEntity = Hydration.buildRowReader<'Selected> ctx.Provider reader
+            let results = ResizeArray<'Selected>()
+            while reader.Read() do
+                results.Add(readEntity())
+            results :> seq<'Selected> |> resultModifier
+        finally
+            ContextUtils.disposeIfNotShared ct ctx
+
+    member this.RunMapped(query: Query, resultModifier) =
+        let ctx = ContextUtils.getContextSync ct
+        try
+            use cmd = ctx.BuildCommand(query)
+            use reader = cmd.ExecuteReader()
+            let readEntity = Hydration.buildRowReader<'Selected> ctx.Provider reader
+            let mapFn = this.MapFn.Value
+            let results = ResizeArray<'Mapped>()
+            while reader.Read() do
+                results.Add(mapFn.Invoke(readEntity()))
+            results :> seq<'Mapped> |> resultModifier
+        finally
+            ContextUtils.disposeIfNotShared ct ctx
+
+    member private this.RunSelectExpr(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+        let ctx = ContextUtils.getContextSync ct
+        try
+            use cmd = ctx.BuildCommand(query)
+            use reader = cmd.ExecuteReader()
+            let readRow = Hydration.buildSelectExprReader ctx.Provider reader exprInfo
+            let results = ResizeArray<'Selected>()
+            while reader.Read() do
+                let fields = readRow()
+                let result = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
+                results.Add(result)
+            results :> seq<'Selected> |> resultModifier
+        finally
+            ContextUtils.disposeIfNotShared ct ctx
+
+    member private this.RunSelectExprMapped(query: Query, exprInfo: LinqExpressionVisitors.SelectExprInfo, resultModifier) =
+        let ctx = ContextUtils.getContextSync ct
+        try
+            use cmd = ctx.BuildCommand(query)
+            use reader = cmd.ExecuteReader()
+            let readRow = Hydration.buildSelectExprReader ctx.Provider reader exprInfo
+            let results = ResizeArray<'Mapped>()
+            while reader.Read() do
+                let fields = readRow()
+                let selected = exprInfo.CompiledMapper.Invoke(fields) :?> 'Selected
+                results.Add(this.MapFn.Value.Invoke(selected))
+            results :> seq<'Mapped> |> resultModifier
+        finally
+            ContextUtils.disposeIfNotShared ct ctx
+
+    /// Run: default
+    member this.Run(state: QuerySource<'Selected, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, id)
+        | None -> this.RunSelected(state.Query, id)
+
+    /// Run: toList
+    member this.Run(state: QuerySource<'Selected list, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toList)
+        | None -> this.RunSelected(state.Query, Seq.toList)
+
+    /// Run: toArray
+    member this.Run(state: QuerySource<'Selected array, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.toArray)
+        | None -> this.RunSelected(state.Query, Seq.toArray)
+
+    /// Run: mapList
+    member this.Run(state: QuerySource<'Mapped list, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toList)
+        | None -> this.RunMapped(state.Query, Seq.toList)
+
+    // Run: mapArray
+    member this.Run(state: QuerySource<'Mapped array, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.toArray)
+        | None -> this.RunMapped(state.Query, Seq.toArray)
+
+    // Run: mapSeq
+    member this.Run(state: QuerySource<'Mapped seq, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, id)
+        | None -> this.RunMapped(state.Query, id)
+
+    // Run: tryHead - 'Selected
+    member this.Run(state: QuerySource<'Selected option, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.tryHead)
+        | None -> this.RunSelected(state.Query, Seq.tryHead)
+
+    // Run: tryHead - 'Mapped
+    member this.Run(state: QuerySource<'Mapped option, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.tryHead)
+        | None -> this.RunMapped(state.Query, Seq.tryHead)
+
+    // Run: head - 'Selected
+    member this.Run(state: QuerySource<ResultModifier.Head<'Selected>, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExpr(state.Query, exprInfo, Seq.head)
+        | None -> this.RunSelected(state.Query, Seq.head)
+
+    // Run: head - 'Mapped
+    member this.Run(state: QuerySource<ResultModifier.Head<'Mapped>, Query>) =
+        match LinqExpressionVisitors.SelectExprStore.tryGet(state.Query) with
+        | Some exprInfo -> this.RunSelectExprMapped(state.Query, exprInfo, Seq.head)
+        | None -> this.RunMapped(state.Query, Seq.head)
+
+    // Run: count
+    member this.Run(state: QuerySource<ResultModifier.Count<int>, Query>) =
+        let ctx = ContextUtils.getContextSync ct
+        try ctx.Count(SelectQuery<int>(state.Query))
+        finally ContextUtils.disposeIfNotShared ct ctx
+
+
 /// Builds and returns a select query that can be manually run by piping into QueryContext read methods
 let select<'Selected, 'Mapped> =
     SelectQueryBuilder<'Selected, 'Mapped>()
@@ -928,5 +1063,12 @@ let inline selectTask< ^Selected, ^Mapped, ^Context
     (ctSource: ^Context) =
     let ct = ContextTypeResolver.resolve ctSource
     SelectTaskBuilder< ^Selected, ^Mapped>(ct)
+
+/// Builds a select query with a context source - returns a synchronous query result
+let inline selectSync< ^Selected, ^Mapped, ^Context
+    when (ContextTypeResolver.Resolver or ^Context) : (static member ($) : ContextTypeResolver.Resolver * ^Context -> ContextType)>
+    (ctSource: ^Context) =
+    let ct = ContextTypeResolver.resolve ctSource
+    SelectSyncBuilder< ^Selected, ^Mapped>(ct)
 
 
