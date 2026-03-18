@@ -1337,3 +1337,57 @@ let ``multiple whereNotExists``() =
 
     let count = System.Text.RegularExpressions.Regex.Matches(sql, "NOT EXISTS").Count
     count =! 2
+
+[<Test>]
+let ``where with Option variable None emits IS NULL``() =
+    let provider: string option = None
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (o.comment = provider)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("IS NULL") =! true
+
+[<Test>]
+let ``where with Option variable Some emits equals``() =
+    let provider: string option = Some "test"
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (o.comment = provider)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("=") =! true
+    sql.Contains("IS NULL") =! false
+
+[<Test>]
+let ``where with int Option variable None emits IS NULL``() =
+    let creditCard: int option = None
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (o.creditcardid = creditCard)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("IS NULL") =! true
+
+[<Test>]
+let ``where with int Option variable Some emits equals``() =
+    let creditCard: int option = Some 42
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (o.creditcardid = creditCard)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("=") =! true
+    sql.Contains("IS NULL") =! false
