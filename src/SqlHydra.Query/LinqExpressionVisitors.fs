@@ -805,8 +805,11 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 | null ->
                     // Get the inner record type from Option<T>
                     let innerType = p.Type.GetGenericArguments().[0]
-                    // Get the first record field to use for the IS NULL / IS NOT NULL check
-                    let firstField = FSharp.Reflection.FSharpType.GetRecordFields(innerType).[0]
+                    // Use the first record field for the IS NULL / IS NOT NULL check
+                    match FSharp.Reflection.FSharpType.GetRecordFields(innerType) |> Array.tryHead with
+                    | None ->
+                        notImplMsg $"Anti-join pattern requires a record type with at least one field, but {innerType.Name} has none."
+                    | Some firstField ->
                     let fqCol = qualifyColumn p.Name (firstField :> MemberInfo)
                     match exp.NodeType with
                     | ExpressionType.Equal -> query.WhereNull(fqCol)
