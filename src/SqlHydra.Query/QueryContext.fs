@@ -396,46 +396,21 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
                 return outputValues
         }
     
-    /// Applies raw SET expressions to a compiled UPDATE command by injecting raw SQL clauses.
-    member private this.ApplyRawSetValues(cmd: DbCommand, rawValues: (string * string * obj array) list) =
-        for (col, rawSql, parms) in rawValues do
-            // Replace ? placeholders with parameterized @pN values
-            let mutable processedSql = rawSql
-            for p in parms do
-                let paramName = $"@p{cmd.Parameters.Count}"
-                let idx = processedSql.IndexOf('?')
-                if idx >= 0 then
-                    processedSql <- processedSql.Substring(0, idx) + paramName + processedSql.Substring(idx + 1)
-                let dbParam = cmd.CreateParameter()
-                dbParam.ParameterName <- paramName
-                dbParam.Value <- if isNull p then box System.DBNull.Value else p
-                cmd.Parameters.Add(dbParam) |> ignore
-
-            let wrappedCol = compiler.Wrap(col)
-            let newClause = $"{wrappedCol} = {processedSql}"
-
-            // Check if this column has a placeholder from setRaw-only mode
-            let placeholderParam =
-                cmd.Parameters
-                |> Seq.cast<DbParameter>
-                |> Seq.tryFind (fun p -> p.Value :? string && (p.Value :?> string) = "__SETRAW_PLACEHOLDER__")
-
-            match placeholderParam with
-            | Some ph ->
-                // Replace the placeholder SET clause entirely
-                let placeholder = $"{wrappedCol} = {ph.ParameterName}"
-                cmd.CommandText <- cmd.CommandText.Replace(placeholder, newClause)
-                cmd.Parameters.Remove(ph)
-            | None ->
-                // Append as additional SET clause before WHERE
-                let whereIdx = cmd.CommandText.IndexOf(" WHERE", StringComparison.OrdinalIgnoreCase)
-                let insertPoint = if whereIdx > 0 then whereIdx else cmd.CommandText.Length
-                cmd.CommandText <- cmd.CommandText.Insert(insertPoint, $", {newClause}")
+    /// Adds raw SET parameter bindings from SetRawParamStore to a command.
+    member private this.ApplySetRawParams(cmd: DbCommand, kataQuery: Query) =
+        match SetRawParamStore.tryTake kataQuery with
+        | Some parms ->
+            for (name, value) in parms do
+                let p = cmd.CreateParameter()
+                p.ParameterName <- name
+                p.Value <- if isNull value then box System.DBNull.Value else value
+                cmd.Parameters.Add(p) |> ignore
+        | None -> ()
 
     member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) =
-        use cmd = this.BuildCommand(query.ToKataQuery())
-        if query.Spec.SetRawValues.Length > 0 then
-            this.ApplyRawSetValues(cmd, query.Spec.SetRawValues)
+        let kataQuery = query.ToKataQuery()
+        use cmd = this.BuildCommand(kataQuery)
+        this.ApplySetRawParams(cmd, kataQuery)
         cmd.ExecuteNonQuery()
 
     member this.UpdateAsync (query: UpdateQuery<'T, 'UpdateReturn>) =
@@ -445,10 +420,9 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         task { // Must wrap in task to prevent `EndExecuteNonQuery` ex in NET6_0_OR_GREATER
             let cancel = defaultArg cancel CancellationToken.None
 
-            use cmd = this.BuildCommand(query.ToKataQuery())
-
-            if query.Spec.SetRawValues.Length > 0 then
-                this.ApplyRawSetValues(cmd, query.Spec.SetRawValues)
+            let kataQuery = query.ToKataQuery()
+            use cmd = this.BuildCommand(kataQuery)
+            this.ApplySetRawParams(cmd, kataQuery)
 
             if query.Spec.OutputFields.Length > 0 then
                 // Append SQL Server output clause

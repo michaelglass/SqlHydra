@@ -181,6 +181,25 @@ module PendingJoins =
             Some pj
         | false, _ -> None
 
+/// Module to store raw SET parameter bindings for update queries using setRaw.
+module SetRawParamStore =
+    open System.Runtime.CompilerServices
+
+    let private store = ConditionalWeakTable<SqlKata.Query, (string * obj) list>()
+
+    /// Associates raw SET parameter bindings with a query
+    let set (query: SqlKata.Query) (parms: (string * obj) list) =
+        store.Remove(query) |> ignore
+        store.Add(query, parms)
+
+    /// Gets and removes raw SET parameter bindings for a query
+    let tryTake (query: SqlKata.Query) =
+        match store.TryGetValue(query) with
+        | true, parms ->
+            store.Remove(query) |> ignore
+            Some parms
+        | false, _ -> None
+
 /// Module to store DISTINCT ON column info for PostgreSQL queries.
 module DistinctOnStore =
     open System.Runtime.CompilerServices
@@ -250,36 +269,60 @@ module internal KataUtils =
         p.GetValue(entity) 
         |> getQueryParameterForValue p
         
-    let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) = 
-        let kvps = 
+    let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) =
+        let kvps =
             match spec.Entity, spec.SetValues with
-            | Some entity, [] -> 
-                match spec.Fields with 
-                | [] -> 
-                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) 
+            | Some entity, [] ->
+                match spec.Fields with
+                | [] ->
+                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
                     |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
-                        
-                | fields -> 
+
+                | fields ->
                     let included = fields |> Set.ofList
-                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>) 
-                    |> Array.filter (fun p -> included.Contains(p.Name)) 
+                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                    |> Array.filter (fun p -> included.Contains(p.Name))
                     |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
 
             | Some _, _ -> failwith "Cannot have both `entity` and `set` operations in an `update` expression."
             | None, [] when spec.SetRawValues.Length > 0 ->
-                // setRaw-only update: use first raw value column as placeholder so SqlKata generates valid UPDATE
-                let (col, _, _) = spec.SetRawValues.[0]
-                [| col, box "__SETRAW_PLACEHOLDER__" |]
+                // setRaw-only update: no regular kvps needed, raw kvps will be generated below
+                [||]
             | None, [] -> failwith "Either an `entity`, `set`, or `setRaw` operations must be present in an `update` expression."
             | None, setValues -> setValues |> List.toArray
-                    
-        let preparedKvps = 
-            kvps 
-            |> Seq.map (fun (key,value) -> key, value)
-            |> dict
-            |> Seq.map id
+
+        // Process setRaw values into UnsafeLiteral kvps and collect parameter bindings
+        let mutable rawParamCounter = 0
+        let rawKvps, rawParamBindings =
+            spec.SetRawValues
+            |> List.map (fun (col, rawSql, parms) ->
+                let mutable processedSql = rawSql
+                let bindings = ResizeArray<string * obj>()
+                for p in parms do
+                    let paramName = $"@__raw_{rawParamCounter}"
+                    rawParamCounter <- rawParamCounter + 1
+                    let idx = processedSql.IndexOf('?')
+                    if idx >= 0 then
+                        processedSql <- processedSql.Substring(0, idx) + paramName + processedSql.Substring(idx + 1)
+                    bindings.Add(paramName, if isNull p then box System.DBNull.Value else p)
+                (col, UnsafeLiteral(processedSql) :> obj), bindings |> Seq.toList
+            )
+            |> List.unzip
+
+        let allKvps =
+            Array.append kvps (rawKvps |> List.toArray)
+
+        let preparedKvps =
+            allKvps
+            |> Seq.map (fun (key,value) -> KeyValuePair(key, value))
+            |> Seq.toArray
 
         let q = Query(spec.Table).AsUpdate(preparedKvps)
+
+        // Store raw parameter bindings for later use in QueryContext
+        let allRawBindings = rawParamBindings |> List.concat
+        if allRawBindings.Length > 0 then
+            SetRawParamStore.set q allRawBindings
 
         // Apply `where` clause
         match spec.Where with

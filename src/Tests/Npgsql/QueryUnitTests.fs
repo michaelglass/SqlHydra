@@ -707,10 +707,11 @@ let ``Update with setRaw and set generates correct SQL``() =
         }
         |> toSql
 
-    // The base SQL from SqlKata will have SET "customerid" = @p0
-    // setRaw values are applied post-compilation in QueryContext, not visible in toSql
+    // With UnsafeLiteral, both set and setRaw appear in toSql output
     sql.Contains("SET") =! true
     sql.Contains("\"customerid\"") =! true
+    sql.Contains("\"personid\"") =! true
+    sql.Contains("COALESCE") =! true
 
 [<Test>]
 let ``Update with only setRaw generates valid query``() =
@@ -727,6 +728,38 @@ let ``Update with only setRaw generates valid query``() =
     let sql = query |> toSql
 
     sql.Contains("UPDATE") =! true
+    sql.Contains("COALESCE") =! true
+    sql.Contains("\"personid\"") =! true
+
+[<Test>]
+let ``setRaw raw SQL appears in toSql output``() =
+    let sql =
+        update {
+            for c in sales.customer do
+            setRaw c.personid "COALESCE(@__raw_0, \"personid\") + 1" [||]
+            where (c.customerid = 1)
+        }
+        |> toSql
+
+    // With UnsafeLiteral integration, raw SQL is visible in toSql
+    sql.Contains("COALESCE") =! true
+    sql.Contains("\"personid\"") =! true
+
+[<Test>]
+let ``Mixed set and setRaw both appear in toSql``() =
+    let sql =
+        update {
+            for c in sales.customer do
+            set c.customerid 42
+            setRaw c.personid "COALESCE(?, \"personid\")" [| box 99 |]
+            where (c.customerid = 1)
+        }
+        |> toSql
+
+    // Both regular SET and raw SET should appear
+    sql.Contains("\"customerid\"") =! true
+    sql.Contains("\"personid\"") =! true
+    sql.Contains("COALESCE") =! true
 
 [<Test>]
 let ``Insert onConflictDoUpdateCoalesce stores correct spec``() =
