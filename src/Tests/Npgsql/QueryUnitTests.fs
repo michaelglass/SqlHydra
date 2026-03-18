@@ -682,7 +682,7 @@ let ``Where =% ILIKE with captured variable pattern``() =
     sql.Contains("ilike") =! true
 
 [<Test>]
-let ``Where =% ILIKE conditional with Some filter includes clause``() =
+let ``Where =% ILIKE conditional AND with Some filter includes clause``() =
     let senderFilter = Some "test"
     let sql =
         select {
@@ -694,7 +694,7 @@ let ``Where =% ILIKE conditional with Some filter includes clause``() =
     sql.Contains("ilike") =! true
 
 [<Test>]
-let ``Where =% ILIKE conditional with None filter skips clause``() =
+let ``Where =% ILIKE conditional AND with None filter skips clause``() =
     let senderFilter : string option = None
     let sql =
         select {
@@ -703,8 +703,33 @@ let ``Where =% ILIKE conditional with None filter skips clause``() =
         }
         |> toSql
 
-    // When filter is None, IsSome=false short-circuits && and skips the ILIKE clause
     sql.Contains("ilike") =! false
+
+[<Test>]
+let ``Where =% ILIKE conditional OR with None filter skips clause``() =
+    let senderFilter : string option = None
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (senderFilter.IsNone || o.purchaseordernumber =% $"%%{senderFilter.Value}%%")
+        }
+        |> toSql
+
+    // IsNone=true → true || anything = always true → no filtering needed
+    sql.Contains("ilike") =! false
+
+[<Test>]
+let ``Where =% ILIKE conditional OR with Some filter includes clause``() =
+    let senderFilter = Some "test"
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            where (senderFilter.IsNone || o.purchaseordernumber =% $"%%{senderFilter.Value}%%")
+        }
+        |> toSql
+
+    // IsNone=false → false || right = right determines result → ILIKE included
+    sql.Contains("ilike") =! true
 
 [<Test>]
 let ``Select with kata SelectRaw adds computed column``() =

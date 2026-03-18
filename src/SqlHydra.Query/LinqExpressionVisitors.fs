@@ -670,16 +670,16 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
 
         | NBinaryOr(left, right) ->
             match left with
-            // Allow user to enable or disable right side where clause
+            // Standard boolean OR: true || right = always true (skip clause), false || right = right determines result
             | NValue enabled ->
                 if enabled :?> bool
-                then visit right (Query())
-                else query
+                then query // true || anything = always true, no filtering needed
+                else visit right (Query()) // false || right = right determines result
             | _ ->
-                // Try evaluating non-column bool expressions (e.g., capturedOption.IsSome)
+                // Try evaluating non-column bool expressions (e.g., capturedOption.IsNone)
                 match (try nEvaluate left |> Some with _ -> None) with
                 | Some (:? bool as enabled) ->
-                    if enabled then visit right (Query()) else query
+                    if enabled then query else visit right (Query())
                 | _ ->
                 let lt = visit left (Query())
                 let rt = visit right (Query())
