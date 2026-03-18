@@ -962,6 +962,51 @@ let ``leftJoin' select mixed tuple with table var and scalar``() =
     sql.Contains("\"o\".\"salesorderid\"") =! true
 
 [<Test>]
+let ``Multi-join orderBy on first table column``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            orderByDescending o.orderdate
+            select (o.salesorderid, d.unitprice)
+        }
+        |> toSql
+
+    sql.Contains("INNER JOIN") =! true
+    sql.Contains("ORDER BY") =! true
+    sql.Contains("\"orderdate\"") =! true
+
+[<Test>]
+let ``Multi-join orderBy on joined table column``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            orderBy d.unitprice
+            select (o.salesorderid, d.unitprice)
+        }
+        |> toSql
+
+    sql.Contains("INNER JOIN") =! true
+    sql.Contains("ORDER BY") =! true
+    sql.Contains("\"unitprice\"") =! true
+
+[<Test>]
+let ``Multi-join orderByDescending on joined table column``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            orderByDescending d.unitprice
+            select (o.salesorderid, d.unitprice)
+        }
+        |> toSql
+
+    sql.Contains("INNER JOIN") =! true
+    sql.Contains("ORDER BY") =! true
+    sql.Contains("\"unitprice\" DESC") =! true
+
+[<Test>]
 let ``Select with inlineValue injects external value as parameter``() =
     let externalValue = "hello"
     let sql =
