@@ -145,7 +145,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     /// Sets the WHERE condition
     [<CustomOperation("where", MaintainsVariableSpace = true)>]
-    member this.Where (state: QuerySource<'T, Query>, [<ProjectionParameter>] whereExpression) = 
+    member this.Where (state: QuerySource<'T, Query>, [<ProjectionParameter>] whereExpression) =
         let query = state.Query
         let tableMappings = state.TableMappings |> Map.values
         let where = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression qualifyColumnWithAlias
@@ -373,7 +373,15 @@ type SelectBuilder<'Selected, 'Mapped> () =
                       innerSource: QuerySource<'Inner>,
                       resultSelector: Expression<Func<'Outer,'Inner,'JoinResult>> ) =
 
-        let mergedTables = mergeTableMappings (outerSource.TableMappings, innerSource.TableMappings)
+        // Extract the inner alias from resultSelector's second parameter (e.g., "o")
+        let innerAlias =
+            match resultSelector.Parameters |> Seq.toList with
+            | [_; inner] -> inner.Name
+            | _ -> failwith "Expected two parameters in correlate result selector"
+
+        // Convert the inner source's Root key to a proper alias key before merging
+        let _, innerTableMappings = TableMappings.tryGetByRootOrAlias innerAlias innerSource.TableMappings
+        let mergedTables = mergeTableMappings (outerSource.TableMappings, innerTableMappings)
         let query = outerSource |> getQueryOrDefault
         QuerySource<'JoinResult, Query>(query, mergedTables)
 

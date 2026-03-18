@@ -180,13 +180,21 @@ module SqlPatterns =
             genericTypeDef = typedefof<Nullable<_>>
         )
 
-    let tryGetMember(x: Expression) = 
+    let tryGetMember(x: Expression) =
         match x with
-        | Member m when m.Expression = null -> 
+        | Member m when m.Expression = null ->
             None
-        | Member m when m.Expression.NodeType = ExpressionType.Parameter || m.Expression.NodeType = ExpressionType.MemberAccess -> 
+        | Member m when m.Expression.NodeType = ExpressionType.Parameter || m.Expression.NodeType = ExpressionType.MemberAccess ->
             Some m
-        | MethodCall opt when opt.Type |> isOptionType ->        
+        | Member m when m.Expression.NodeType = ExpressionType.Call ->
+            // Handle tuple destructuring from correlate/IsLikeZip (get_Item1, get_Item2, etc.)
+            match m.Expression with
+            | MethodCall mc when mc.Method.Name.StartsWith("get_Item") -> Some m
+            | _ -> None
+        | Member m when m.Expression.NodeType = ExpressionType.Block ->
+            // Handle BlockExpression wrapping from tuple destructuring
+            Some m
+        | MethodCall opt when opt.Type |> isOptionType ->
             if opt.Arguments.Count > 0 then
                 // Option.Some
                 match opt.Arguments.[0] with
@@ -435,6 +443,10 @@ let visitAlias (exp: Expression) =
         match exp with
         | Member m -> visit m.Expression
         | Parameter p -> p.Name
+        | MethodCall m when m.Method.Name.StartsWith("get_Item") ->
+            visit m.Object
+        | :? System.Linq.Expressions.BlockExpression as block ->
+            visit block.Result
         | _ -> notImpl()
     visit exp
 
