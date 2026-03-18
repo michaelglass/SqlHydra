@@ -1237,3 +1237,34 @@ let ``lateralJoin combined with regular leftJoin``() =
     sql.Contains("LEFT JOIN LATERAL") =! true
     sql.Contains("detail_counts") =! true
     sql.Contains("\"customer\"") =! true
+
+[<Test>]
+let ``groupBy after leftJoin' does not throw``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail
+            on' (d.Value.salesorderid = o.salesorderid)
+            groupBy o.customerid
+            select o
+        }
+        |> toSql
+
+    sql.Contains("GROUP BY") =! true
+    sql.Contains("\"o\".\"customerid\"") =! true
+
+[<Test>]
+let ``groupBy multiple columns after leftJoin'``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.salesorderdetail
+            on' (d.Value.salesorderid = o.salesorderid)
+            groupBy (o.customerid, o.status)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("GROUP BY") =! true
+    sql.Contains("\"o\".\"customerid\"") =! true
+    sql.Contains("\"o\".\"status\"") =! true

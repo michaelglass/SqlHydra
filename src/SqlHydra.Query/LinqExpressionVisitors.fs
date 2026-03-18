@@ -982,6 +982,8 @@ let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'P
         match nexp with
         | NNew(_, args) ->
             args |> List.collect visit
+        | NMethodCall(m, args) when m.Method.Name.StartsWith("get_Item") ->
+            visit args.[0]
         | NMemberAccess(inner, m) ->
             let alias = nVisitAlias inner
             let column = qualifyColumn alias m.Member
