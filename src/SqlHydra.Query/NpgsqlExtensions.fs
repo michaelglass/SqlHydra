@@ -198,3 +198,18 @@ type SelectBuilder<'Selected, 'Mapped> with
             )
         QuerySource<'T, Query>(updatedQuery, state.TableMappings)
 
+    /// ORDER BY column_expr <=> @vector (pgvector cosine distance, ascending — closest first)
+    [<CustomOperation("orderByCosineDistance", MaintainsVariableSpace = true)>]
+    member this.OrderByCosineDistance (state: QuerySource<'T, Query>, columnExpr: string, vector: obj) =
+        QuerySource<'T, Query>(state.Query.OrderByRaw($"{columnExpr} <=> ?", [| vector |]), state.TableMappings)
+
+    /// ORDER BY column_expr <-> @vector (pgvector L2/Euclidean distance, ascending — closest first)
+    [<CustomOperation("orderByL2Distance", MaintainsVariableSpace = true)>]
+    member this.OrderByL2Distance (state: QuerySource<'T, Query>, columnExpr: string, vector: obj) =
+        QuerySource<'T, Query>(state.Query.OrderByRaw($"{columnExpr} <-> ?", [| vector |]), state.TableMappings)
+
+    /// ORDER BY column_expr <#> @vector (pgvector inner product distance, ascending)
+    [<CustomOperation("orderByInnerProductDistance", MaintainsVariableSpace = true)>]
+    member this.OrderByInnerProductDistance (state: QuerySource<'T, Query>, columnExpr: string, vector: obj) =
+        QuerySource<'T, Query>(state.Query.OrderByRaw($"{columnExpr} <#> ?", [| vector |]), state.TableMappings)
+

@@ -1391,3 +1391,45 @@ let ``where with int Option variable Some emits equals``() =
 
     sql.Contains("=") =! true
     sql.Contains("IS NULL") =! false
+
+[<Test>]
+let ``orderByCosineDistance emits <=> operator``() =
+    let vector = [| 0.1f; 0.2f; 0.3f |]
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            orderByCosineDistance "\"o\".\"embedding\"" (box vector)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("<=>") =! true
+    sql.Contains("ORDER BY") =! true
+
+[<Test>]
+let ``orderByL2Distance emits <-> operator``() =
+    let vector = [| 0.1f; 0.2f; 0.3f |]
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            orderByL2Distance "\"o\".\"embedding\"" (box vector)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("<->") =! true
+    sql.Contains("ORDER BY") =! true
+
+[<Test>]
+let ``orderByInnerProductDistance emits <#> operator``() =
+    let vector = [| 0.1f; 0.2f; 0.3f |]
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            orderByInnerProductDistance "\"o\".\"embedding\"" (box vector)
+            select o
+        }
+        |> toSql
+
+    sql.Contains("<#>") =! true
+    sql.Contains("ORDER BY") =! true
