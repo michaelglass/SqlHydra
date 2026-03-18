@@ -496,16 +496,6 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let having = LinqExpressionVisitors.visitHaving<'T> tableMappings havingExpression qualifyColumnWithAlias
         QuerySource<'T, Query>(state.Query.Having(fun w -> having), state.TableMappings)
 
-    /// Sets a raw HAVING clause.
-    [<CustomOperation("havingRaw", MaintainsVariableSpace = true)>]
-    member this.HavingRaw (state: QuerySource<'T, Query>, rawSql: string) =
-        QuerySource<'T, Query>(state.Query.HavingRaw(rawSql), state.TableMappings)
-
-    /// Sets a raw ORDER BY clause.
-    [<CustomOperation("orderByRaw", MaintainsVariableSpace = true)>]
-    member this.OrderByRaw (state: QuerySource<'T, Query>, rawSql: string) =
-        QuerySource<'T, Query>(state.Query.OrderByRaw(rawSql), state.TableMappings)
-
     /// Sets query to return DISTINCT values
     [<CustomOperation("distinct", MaintainsVariableSpace = true)>]
     member this.Distinct (state: QuerySource<'T, Query>) =

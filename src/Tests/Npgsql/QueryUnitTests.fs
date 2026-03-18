@@ -1485,30 +1485,3 @@ let ``countDistinct in having``() =
     sql.Contains("COUNT(DISTINCT") =! true
     sql.Contains("HAVING") =! true
 
-[<Test>]
-let ``havingRaw produces raw HAVING clause``() =
-    let sql =
-        select {
-            for o in sales.salesorderheader do
-            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
-            groupBy o.salesorderid
-            havingRaw "COUNT(DISTINCT \"d\".\"salesorderdetailid\") > 5"
-            select o.salesorderid
-        }
-        |> toSql
-
-    sql.Contains("HAVING") =! true
-    sql.Contains("COUNT(DISTINCT") =! true
-
-[<Test>]
-let ``orderByRaw produces raw ORDER BY``() =
-    let sql =
-        select {
-            for o in sales.salesorderheader do
-            orderByRaw "open_rate DESC"
-            select o
-        }
-        |> toSql
-
-    sql.Contains("ORDER BY") =! true
-    sql.Contains("open_rate DESC") =! true
