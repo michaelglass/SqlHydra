@@ -95,6 +95,7 @@ type InsertType =
     | OnConflictDoUpdateCoalesce of conflictFields: string list * updateFields: string list * coalesceFields: string list
     | OnConflictDoNothing of conflictFields: string list
     | OnConflictDoNothingWhereRaw of conflictFields: string list * whereClause: string
+    | OnConflictDoNothingRawTarget of rawTarget: string
     | InsertOrUpdateOnUnique of keyFields: string list * updateFields: string list
     | InsertFromSelect of selectQuery: SqlKata.Query
 

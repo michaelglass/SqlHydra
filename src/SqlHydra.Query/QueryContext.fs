@@ -289,6 +289,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
             | OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) -> OnConflict.onConflictDoUpdateCoalesce iq.Spec.Table conflictFields updateFields coalesceFields
             | OnConflictDoNothing conflictFields -> OnConflict.onConflictDoNothing conflictFields
             | OnConflictDoNothingWhereRaw (conflictFields, whereClause) -> OnConflict.onConflictDoNothingWhereRaw conflictFields whereClause
+            | OnConflictDoNothingRawTarget rawTarget -> OnConflict.onConflictDoNothingRawTarget rawTarget
             | Insert -> id
             | InsertOrUpdateOnUnique _ -> id // handled above
             | InsertFromSelect _ -> id

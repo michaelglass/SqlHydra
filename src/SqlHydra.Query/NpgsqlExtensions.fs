@@ -115,6 +115,14 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
         let newSpec = { spec with InsertType = OnConflictDoNothingWhereRaw (conflictFields, whereClause) }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
 
+    /// Insert is ignored if a conflict occurs. Accepts a raw SQL conflict target for expression indexes.
+    [<CustomOperation("onConflictDoNothingRawTarget", MaintainsVariableSpace = true)>]
+    member this.OnConflictDoNothingRawTarget(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        rawTarget: string) =
+        let spec = state.Query
+        let newSpec = { spec with InsertType = OnConflictDoNothingRawTarget rawTarget }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
     /// Returns specified columns from the inserted row (PostgreSQL RETURNING clause).
     [<CustomOperation("returning", MaintainsVariableSpace = true)>]
     member this.Returning (state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, [<ProjectionParameter>] selectExpression) =

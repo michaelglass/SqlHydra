@@ -82,6 +82,20 @@ let onConflictDoNothing (conflictColumns: string list) (cmdText: string) =
         .AppendLine(identityQuery)
         .ToString()
 
+/// Modifies an insert query to "ON CONFLICT (raw_target) DO NOTHING" using a raw SQL conflict target
+let onConflictDoNothingRawTarget (rawTarget: string) (cmdText: string) =
+    let insertQuery, identityQuery =
+        match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
+        | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
+        | _ -> cmdText, ""
+
+    Text.StringBuilder()
+        .AppendLine(insertQuery)
+        .AppendLine($"ON CONFLICT({rawTarget})")
+        .AppendLine("DO NOTHING;")
+        .AppendLine(identityQuery)
+        .ToString()
+
 /// Modifies an insert query to "ON CONFLICT ... WHERE ... DO NOTHING" using a raw SQL WHERE clause
 let onConflictDoNothingWhereRaw (conflictColumns: string list) (whereClause: string) (cmdText: string) =
     // Separate insert query from optional identity query

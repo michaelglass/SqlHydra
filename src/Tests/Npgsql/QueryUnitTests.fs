@@ -526,6 +526,25 @@ let ``Insert OnConflictDoNothing with WhereRaw``() =
     | _ -> Assert.Fail("Expected OnConflictDoNothingWhereRaw")
 
 [<Test>]
+let ``Insert onConflictDoNothingRawTarget with expression index``() =
+    let query =
+        insert {
+            for c in sales.currency do
+            entity
+                {
+                    sales.currency.currencycode = "TST"
+                    sales.currency.name = "Test"
+                    sales.currency.modifieddate = System.DateTime.Now
+                }
+            onConflictDoNothingRawTarget "currencycode, COALESCE(name, '')"
+        }
+
+    match query.Spec.InsertType with
+    | OnConflictDoNothingRawTarget target ->
+        Assert.AreEqual("currencycode, COALESCE(name, '')", target)
+    | other -> Assert.Fail($"Expected OnConflictDoNothingRawTarget, got {other}")
+
+[<Test>]
 let ``Where with Coalesce``() =
     let sql =
         select {
