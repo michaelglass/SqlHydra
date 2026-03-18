@@ -357,7 +357,31 @@ let ``Delete All``() =
     sql =! "DELETE FROM \"sales\".\"customer\""
 
 [<Test>]
-let ``Update Query with Where``() = 
+let ``Delete with kata WhereRaw``() =
+    let sql =
+        delete {
+            for c in sales.customer do
+            where (c.customerid = 1)
+            kata (fun q -> q.WhereRaw("COALESCE(\"storeid\", 0) = ?", [| box 0 |]))
+        }
+        |> toSql
+
+    sql.Contains("COALESCE") =! true
+    sql.Contains("\"customerid\"") =! true
+
+[<Test>]
+let ``Update with kata WhereRaw``() =
+    let query =
+        update {
+            for c in sales.customer do
+            set c.personid (Some 123)
+            kata (fun q -> q.WhereRaw("COALESCE(\"storeid\", 0) = COALESCE(?, 0)", [| box 456 |]))
+        }
+
+    Assert.IsTrue(query.Spec.Where.IsSome, "Where should be populated by kata")
+
+[<Test>]
+let ``Update Query with Where``() =
     let sql =  
         update {
             for c in sales.customer do

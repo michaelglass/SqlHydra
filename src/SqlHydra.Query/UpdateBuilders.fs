@@ -96,6 +96,16 @@ type UpdateBuilder<'Updated, 'UpdateReturn>() =
             | Some w -> w.Where(fun w -> where) |> Some
         QuerySource<'T, UpdateQuerySpec<'T, 'UpdateReturn>>({ query with Where = where'; UpdateAll = false }, state.TableMappings)
 
+    /// Provides direct access to the underlying SqlKata WHERE query for raw SQL escape hatches.
+    [<CustomOperation("kata", MaintainsVariableSpace = true)>]
+    member this.Kata (state: QuerySource<'T>, kata: SqlKata.Query -> SqlKata.Query) =
+        let query = state |> getQueryOrDefault
+        let where' =
+            match query.Where with
+            | None -> kata (SqlKata.Query()) |> Some
+            | Some w -> kata w |> Some
+        QuerySource<'T, UpdateQuerySpec<'T, 'UpdateReturn>>({ query with Where = where' }, state.TableMappings)
+
     /// A safeguard that verifies that all records in the table should be updated.
     [<CustomOperation("updateAll", MaintainsVariableSpace = true)>]
     member this.UpdateAll (state: QuerySource<'T>) = 

@@ -39,6 +39,12 @@ type DeleteBuilder<'Deleted>() =
         let where = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression (FQ.fullyQualifyColumn state.TableMappings)
         QuerySource<'T, Query>(query.Where(fun w -> where), state.TableMappings)
 
+    /// Provides direct access to the underlying SqlKata.Query for raw SQL escape hatches.
+    [<CustomOperation("kata", MaintainsVariableSpace = true)>]
+    member this.Kata (state: QuerySource<'T>, kata: SqlKata.Query -> SqlKata.Query) =
+        let query = state |> getQueryOrDefault
+        QuerySource<'T, Query>(query |> kata, state.TableMappings)
+
     /// Deletes all records in the table (only when there are is no where clause)
     [<CustomOperation("deleteAll", MaintainsVariableSpace = true)>]
     member this.DeleteAll (state:QuerySource<'T>) = 
