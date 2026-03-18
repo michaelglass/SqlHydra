@@ -1160,3 +1160,27 @@ let ``INSERT FROM SELECT with inlineValue for external values``() =
     match query.Spec.InsertType with
     | InsertFromSelect _ -> Assert.Pass()
     | other -> Assert.Fail($"Expected InsertFromSelect, got {other}")
+
+[<Test>]
+let ``LEFT JOIN LATERAL via kata``() =
+    let innerQuery =
+        select {
+            for gd in sales.salesorderdetail do
+            kata (fun q -> q.WhereRaw("\"gd\".\"salesorderid\" = \"o\".\"salesorderid\"")
+                            .SelectRaw("COUNT(*) as detail_count"))
+            select gd
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            kata (fun q ->
+                let subquery = (innerQuery :> SqlHydra.Query.SelectQuery).ToKataQuery()
+                q.Join(subquery, (fun (j: SqlKata.Join) -> j.WhereRaw("true")), "left join lateral"))
+            select o
+        }
+        |> toSql
+
+    printfn "LATERAL SQL: %s" sql
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    sql.Contains("detail_count") =! true
