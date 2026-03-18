@@ -10,8 +10,14 @@ module Table =
         QuerySource<'T>(tables)
 
     /// Creates a CTE (Common Table Expression) source from a select query.
-    /// Use with anonymous records for named column access without boilerplate types.
+    /// When the inner query type matches the CTE type, type inference works automatically.
     let cte<'T> (alias: string) (innerQuery: SelectQuery<'T>) : QuerySource<'T> =
+        let tables = Map [Root, { Name = alias; Schema = ""; RecordType = Some typeof<'T>; CteQuery = Some (innerQuery.ToKataQuery()) }]
+        QuerySource<'T>(tables)
+
+    /// Creates a CTE source where the outer type differs from the inner query type.
+    /// Use when the inner query uses kata SelectRaw for computed columns not in the inner type.
+    let cteFrom<'T> (alias: string) (innerQuery: SelectQuery) : QuerySource<'T> =
         let tables = Map [Root, { Name = alias; Schema = ""; RecordType = Some typeof<'T>; CteQuery = Some (innerQuery.ToKataQuery()) }]
         QuerySource<'T>(tables)
 

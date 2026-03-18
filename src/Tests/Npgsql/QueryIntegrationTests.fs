@@ -1033,3 +1033,65 @@ let ``CTE with anonymous record``() = task {
     gt0 results
     Assert.IsTrue(results |> Seq.forall (fun id -> id > 0), "All customer IDs should be > 0")
 }
+
+type OrderSummary =
+    { customerid: int
+      order_count: int64
+      total_spent: decimal option }
+
+[<Test>]
+let ``CTE with kata aggregate hydrated into anonymous record``() = task {
+    // Inner query: type-safe joins/groupBy, kata for aggregate projections.
+    // select + kata ClearComponent("select") replaces the typed SELECT with raw columns.
+    let innerQuery =
+        select {
+            for o in sales.salesorderheader do
+            groupBy o.customerid
+            select o.customerid
+            kata (fun q ->
+                q.ClearComponent("select")
+                 .SelectRaw("\"o\".\"customerid\"")
+                 .SelectRaw("COUNT(*) as order_count")
+                 .SelectRaw("SUM(\"o\".\"totaldue\") as total_spent"))
+        }
+
+    let! results =
+        selectTask db {
+            for s in cteFrom<{| customerid: int; order_count: int64; total_spent: decimal option |}> "order_stats" innerQuery do
+            where (s.order_count > 1L)
+            select s
+        }
+
+    gt0 results
+    for r in results do
+        Assert.IsTrue(r.order_count > 1L, $"order_count should be > 1, got {r.order_count}")
+        Assert.IsTrue(r.customerid > 0, $"customerid should be > 0, got {r.customerid}")
+}
+
+[<Test>]
+let ``CTE with kata CASE WHEN computed column``() = task {
+    // Same pattern: type-safe structure, kata for computed columns
+    let innerQuery =
+        select {
+            for o in sales.salesorderheader do
+            groupBy o.customerid
+            select o.customerid
+            kata (fun q ->
+                q.ClearComponent("select")
+                 .SelectRaw("\"o\".\"customerid\"")
+                 .SelectRaw("COUNT(*) as order_count")
+                 .SelectRaw("CASE WHEN COUNT(*) > 5 THEN true ELSE false END as is_frequent"))
+        }
+
+    let! results =
+        selectTask db {
+            for s in cteFrom<{| customerid: int; order_count: int64; is_frequent: bool |}> "cust_stats" innerQuery do
+            where s.is_frequent
+            select (s.customerid, s.order_count)
+        }
+
+    gt0 results
+    for (cid, cnt) in results do
+        Assert.IsTrue(cnt > 5L, $"is_frequent customers should have > 5 orders, got {cnt}")
+        Assert.IsTrue(cid > 0, $"customerid should be > 0")
+}
