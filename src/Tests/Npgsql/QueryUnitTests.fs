@@ -1536,3 +1536,39 @@ let ``subquery alias avoids parser ambiguity in whereNotExists``() =
     sql.Contains("NOT EXISTS (SELECT") =! true
     sql.Contains("\"d\".\"unitprice\"") =! true
 
+[<Test>]
+let ``caseWhen with aggregate in condition``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            select {|
+                OrderId = o.salesorderid
+                HasItems = caseWhen (countDistinct d.salesorderdetailid > 0) 1 0
+            |}
+        }
+        |> toSql
+
+    sql.Contains("CASE WHEN") =! true
+    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("AS \"HasItems\"") =! true
+
+[<Test>]
+let ``caseWhen with aggregate in then value``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            select {|
+                OrderId = o.salesorderid
+                ItemsOrZero = caseWhen (countBy d.salesorderdetailid > 0) (countDistinct d.salesorderdetailid) 0
+            |}
+        }
+        |> toSql
+
+    sql.Contains("CASE WHEN") =! true
+    sql.Contains("THEN COUNT(DISTINCT") =! true
+    sql.Contains("AS \"ItemsOrZero\"") =! true
+

@@ -483,6 +483,17 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (exp: 
     | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
     | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
     | Constant c -> sprintf "%O" c.Value
+    | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
+        let aggType =
+            if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
+            else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+        match m.Arguments.[0] with
+        | Member mem ->
+            let alias = visitAlias mem.Expression
+            let fqCol = qualifyColumn alias mem.Member
+            if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT {fqCol})"
+            else $"{aggType}({fqCol})"
+        | _ -> notImplMsg $"Unsupported argument to aggregate in CASE WHEN"
     | MethodCall _ as nested -> visitSqlFn qualifyColumn nested
     | Unary u when u.NodeType = ExpressionType.Convert -> renderExpressionAsSql qualifyColumn u.Operand
     | Binary b ->
@@ -496,6 +507,11 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (exp: 
             | ExpressionType.GreaterThanOrEqual -> ">="
             | ExpressionType.LessThan -> "<"
             | ExpressionType.LessThanOrEqual -> "<="
+            | ExpressionType.Add -> "+"
+            | ExpressionType.Subtract -> "-"
+            | ExpressionType.Multiply -> "*"
+            | ExpressionType.Divide -> "/"
+            | ExpressionType.Modulo -> "%"
             | _ -> notImplMsg $"Unsupported CASE WHEN operator: {b.NodeType}"
         $"{left} {op} {right}"
     | _ -> notImplMsg $"Unsupported CASE WHEN expression: {exp.NodeType}"
@@ -1974,6 +1990,17 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
             | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
             | Constant c -> sprintf "%O" c.Value
+            | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
+                let aggType =
+                    if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
+                    else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+                match m.Arguments.[0] with
+                | Member mem ->
+                    let alias = resolveAliasFromExpr mem.Expression
+                    let fqCol = qualifyCol alias mem.Member
+                    if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT {fqCol})"
+                    else $"{aggType}({fqCol})"
+                | _ -> notImplMsg $"Unsupported argument to aggregate in CASE WHEN"
             | MethodCall _ as nested -> visitSqlFnWithProvenance nested
             | Unary u when u.NodeType = ExpressionType.Convert -> renderExprAsSqlProv u.Operand
             | Binary b ->
@@ -1987,6 +2014,11 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
                     | ExpressionType.GreaterThanOrEqual -> ">="
                     | ExpressionType.LessThan -> "<"
                     | ExpressionType.LessThanOrEqual -> "<="
+                    | ExpressionType.Add -> "+"
+                    | ExpressionType.Subtract -> "-"
+                    | ExpressionType.Multiply -> "*"
+                    | ExpressionType.Divide -> "/"
+                    | ExpressionType.Modulo -> "%"
                     | _ -> notImplMsg $"Unsupported CASE WHEN operator: {b.NodeType}"
                 $"{left} {op} {right}"
             | _ -> notImplMsg $"Unsupported CASE WHEN expression: {exp.NodeType}"
