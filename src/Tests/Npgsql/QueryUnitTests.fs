@@ -1207,3 +1207,57 @@ let ``lateralJoin produces LEFT JOIN LATERAL SQL``() =
     sql.Contains("LEFT JOIN LATERAL") =! true
     sql.Contains("order_totals") =! true
     sql.Contains("total_price") =! true
+
+[<Test>]
+let ``lateralJoin with kata SelectRaw``() =
+    let innerQuery =
+        select {
+            for d in sales.salesorderdetail do
+            kata (fun q ->
+                q.WhereRaw("\"d\".\"salesorderid\" = \"o\".\"salesorderid\"")
+                 .SelectRaw("SUM(\"d\".\"unitprice\" * \"d\".\"orderqty\") as line_total")
+                 .SelectRaw("COUNT(*) as item_count"))
+            select d
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin innerQuery "order_summary"
+            kata (fun q ->
+                q.SelectRaw("\"order_summary\".\"line_total\"")
+                 .SelectRaw("\"order_summary\".\"item_count\""))
+            select o
+        }
+        |> toSql
+
+    printfn "lateralJoin with SelectRaw SQL: %s" sql
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    sql.Contains("order_summary") =! true
+    sql.Contains("line_total") =! true
+    sql.Contains("item_count") =! true
+
+[<Test>]
+let ``lateralJoin combined with regular leftJoin``() =
+    let innerQuery =
+        select {
+            for d in sales.salesorderdetail do
+            kata (fun q -> q.WhereRaw("\"d\".\"salesorderid\" = \"o\".\"salesorderid\"")
+                            .SelectRaw("COUNT(*) as cnt"))
+            select d
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' c in sales.customer; on' (c.Value.customerid = o.customerid)
+            lateralJoin innerQuery "detail_counts"
+            select o
+        }
+        |> toSql
+
+    printfn "lateralJoin combined with leftJoin SQL: %s" sql
+    // Both join types should be present
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    sql.Contains("detail_counts") =! true
+    sql.Contains("\"customer\"") =! true
