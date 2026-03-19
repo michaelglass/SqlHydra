@@ -1572,3 +1572,62 @@ let ``caseWhen with aggregate in then value``() =
     sql.Contains("THEN COUNT(DISTINCT") =! true
     sql.Contains("AS \"ItemsOrZero\"") =! true
 
+[<Test>]
+let ``correlate enables outer-scope references in lateral subquery``() =
+    let lateralQuery =
+        subquery {
+            for d in sales.salesorderdetail do
+            correlate o in sales.salesorderheader
+            where (d.salesorderid = o.salesorderid)
+            select d.salesorderdetailid
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin lateralQuery "detail_ids"
+            select o
+        }
+        |> toSql
+
+    // The lateral subquery should reference "o"."salesorderid" (outer alias)
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    sql.Contains("\"d\".\"salesorderid\" = \"o\".\"salesorderid\"") =! true
+
+[<Test>]
+let ``correlate enables outer-scope in on' inside lateral subquery``() =
+    let lateralQuery =
+        subquery {
+            for d in sales.salesorderdetail do
+            correlate o in sales.salesorderheader
+            leftJoin' p in sales.specialofferproduct
+            on' (p.Value.specialofferid = d.specialofferid && p.Value.productid = o.shiptoaddressid)
+            select d.salesorderdetailid
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin lateralQuery "enriched"
+            select o
+        }
+        |> toSql
+
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    // The on' predicate should resolve both inner (d) and correlated (o) aliases
+    sql.Contains("\"o\".\"shiptoaddressid\"") =! true
+
+[<Test>]
+let ``inlineValue works inside SQL function in select``() =
+    let threshold = 0.5m
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| Score = coalesce(o.freight, inlineValue threshold) |}
+        }
+        |> toSql
+
+    sql.Contains("coalesce") =! true
+    sql.Contains("AS \"Score\"") =! true
+    sql.Contains("@p") =! true
+

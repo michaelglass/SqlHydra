@@ -185,8 +185,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
                 | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
                     // Select a single column
                     q.Select($"%s{tableAlias}.%s{column}")
-                | LinqExpressionVisitors.SelectedExpression (sqlFragment, _) ->
-                    q.SelectRaw(sqlFragment)
+                | LinqExpressionVisitors.SelectedExpression (sqlFragment, _, parameters) ->
+                    if parameters.Length > 0 then q.SelectRaw(sqlFragment, parameters)
+                    else q.SelectRaw(sqlFragment)
                 | LinqExpressionVisitors.SelectedParameter (value, aliasOpt) ->
                     match aliasOpt with
                     | Some alias -> q.SelectRaw($"? AS \"{alias}\"", [| value |])

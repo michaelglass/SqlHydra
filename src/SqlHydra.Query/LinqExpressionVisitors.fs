@@ -452,12 +452,12 @@ let visitAlias (exp: Expression) =
 
 /// Converts a SQL function MethodCall expression to a SQL fragment string.
 /// Example: LEN(p.FirstName) -> "LEN({p}.{FirstName})"
-let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Expression) : string =
+let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: ResizeArray<obj>) (exp: Expression) : string =
     match exp with
     | MethodCall m when m.Method.Name = "caseWhen" ->
-        let condition = renderExpressionAsSql qualifyColumn m.Arguments.[0]
-        let thenValue = renderExpressionAsSql qualifyColumn m.Arguments.[1]
-        let elseValue = renderExpressionAsSql qualifyColumn m.Arguments.[2]
+        let condition = renderExpressionAsSql qualifyColumn parameters m.Arguments.[0]
+        let thenValue = renderExpressionAsSql qualifyColumn parameters m.Arguments.[1]
+        let elseValue = renderExpressionAsSql qualifyColumn parameters m.Arguments.[2]
         $"CASE WHEN {condition} THEN {thenValue} ELSE {elseValue} END"
     | MethodCall m ->
         let fnName = m.Method.Name
@@ -474,9 +474,13 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
                     $"'{c.Value}'"
                 | Constant c ->
                     sprintf "%O" c.Value
+                | MethodCall mc when mc.Method.Name = "inlineValue" && mc.Arguments.Count = 1 ->
+                    let value = compileAndEvaluateExpression mc.Arguments.[0]
+                    parameters.Add(value)
+                    "?"
                 | MethodCall _ as nested ->
                     // Handle nested function calls
-                    visitSqlFn qualifyColumn nested
+                    visitSqlFn qualifyColumn parameters nested
                 | _ ->
                     notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
             )
@@ -486,7 +490,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
 
 /// Renders an expression tree node as a raw SQL fragment (for CASE WHEN conditions etc.)
-and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (exp: Expression) : string =
+and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (parameters: ResizeArray<obj>) (exp: Expression) : string =
     match exp with
     | Member mem ->
         let alias = visitAlias mem.Expression
@@ -495,6 +499,10 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (exp: 
     | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
     | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
     | Constant c -> sprintf "%O" c.Value
+    | MethodCall m when m.Method.Name = "inlineValue" && m.Arguments.Count = 1 ->
+        let value = compileAndEvaluateExpression m.Arguments.[0]
+        parameters.Add(value)
+        "?"
     | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
         let aggType =
             if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
@@ -506,11 +514,11 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (exp: 
             if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT {fqCol})"
             else $"{aggType}({fqCol})"
         | _ -> notImplMsg $"Unsupported argument to aggregate in CASE WHEN"
-    | MethodCall _ as nested -> visitSqlFn qualifyColumn nested
-    | Unary u when u.NodeType = ExpressionType.Convert -> renderExpressionAsSql qualifyColumn u.Operand
+    | MethodCall _ as nested -> visitSqlFn qualifyColumn parameters nested
+    | Unary u when u.NodeType = ExpressionType.Convert -> renderExpressionAsSql qualifyColumn parameters u.Operand
     | Binary b ->
-        let left = renderExpressionAsSql qualifyColumn b.Left
-        let right = renderExpressionAsSql qualifyColumn b.Right
+        let left = renderExpressionAsSql qualifyColumn parameters b.Left
+        let right = renderExpressionAsSql qualifyColumn parameters b.Right
         let op =
             match b.NodeType with
             | ExpressionType.Equal -> "="
@@ -531,7 +539,7 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (exp: 
 /// Delegates to existing visitSqlFn by extracting the original MethodCallExpression.
 let nVisitSqlFn (qualifyColumn: string -> MemberInfo -> string) (nexp: NormalizedExpression) : string =
     match nexp with
-    | NMethodCall(m, _) -> visitSqlFn qualifyColumn (m :> Expression)
+    | NMethodCall(m, _) -> visitSqlFn qualifyColumn (ResizeArray<obj>()) (m :> Expression)
     | _ -> notImplMsg $"Expected NMethodCall for SQL function"
 
 let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>>) (qualifyColumn: string -> MemberInfo -> string) =
@@ -1110,7 +1118,7 @@ let visitPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Pro
 type Selection =
     | SelectedTable of tableAlias: string * tableType: Type
     | SelectedColumn of tableAlias: string * column: string * columnType: Type * isOpt: bool * isNullable: bool
-    | SelectedExpression of sqlFragment: string * alias: string option
+    | SelectedExpression of sqlFragment: string * alias: string option * parameters: obj array
     | SelectedParameter of value: obj * alias: string option
 
 
@@ -1299,20 +1307,22 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                 | None -> notImplMsg $"Could not extract mapping lambda from Option.map expression"
             else
                 let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
-                let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
-                [ SelectedExpression (sqlFragment, None) ]
+                let parms = ResizeArray<obj>()
+                let sqlFragment = visitSqlFn qualifyCol parms (m :> Expression)
+                [ SelectedExpression (sqlFragment, None, parms.ToArray()) ]
         | NAggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
-            [ SelectedExpression (renderAggregate aggType fqCol, None) ]
+            [ SelectedExpression (renderAggregate aggType fqCol, None, [||]) ]
         | NMethodCall(m, args) when m.Method.Name = "inlineValue" && args.Length = 1 ->
             let value = compileAndEvaluateExpression m.Arguments.[0]
             [ SelectedParameter (value, None) ]
         | NMethodCall(m, _) ->
             // Treat any other method call as a SQL function
             let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
-            let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
-            [ SelectedExpression (sqlFragment, None) ]
+            let parms = ResizeArray<obj>()
+            let sqlFragment = visitSqlFn qualifyCol parms (m :> Expression)
+            [ SelectedExpression (sqlFragment, None, parms.ToArray()) ]
         | NNew(n, args) ->
             // Detect whether this is a tuple type (System.Tuple, System.ValueTuple) which should NOT get aliases
             let isTupleType =
@@ -1340,12 +1350,12 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     | Some name ->
                         selections |> List.map (fun sel ->
                             match sel with
-                            | SelectedExpression (frag, _) ->
-                                SelectedExpression ($"{frag} AS \"{name}\"", Some name)
+                            | SelectedExpression (frag, _, parms) ->
+                                SelectedExpression ($"{frag} AS \"{name}\"", Some name, parms)
                             | SelectedParameter (v, _) ->
                                 SelectedParameter (v, Some name)
                             | SelectedColumn (tblAlias, col, colType, isOpt, isNullable) when col <> name ->
-                                SelectedExpression ($"\"{tblAlias}\".\"{col}\" AS \"{name}\"", Some name)
+                                SelectedExpression ($"\"{tblAlias}\".\"{col}\" AS \"{name}\"", Some name, [||])
                             | other -> other
                         )
                 )
