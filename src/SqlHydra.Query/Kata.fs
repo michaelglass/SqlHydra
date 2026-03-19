@@ -268,6 +268,23 @@ module NullsStore =
             Some suffix
         | false, _ -> None
 
+    /// Applies NULLS FIRST/LAST to compiled SQL if present.
+    let applyToSql (query: SqlKata.Query) (sql: string) =
+        match tryTake query with
+        | Some suffix ->
+            let orderByIdx = sql.LastIndexOf("ORDER BY")
+            if orderByIdx >= 0 then
+                let afterOrderBy = sql.Substring(orderByIdx)
+                let endIdx =
+                    [" LIMIT "; " OFFSET "; " FETCH "; " FOR "]
+                    |> List.choose (fun kw ->
+                        let i = afterOrderBy.IndexOf(kw)
+                        if i > 0 then Some (orderByIdx + i) else None)
+                    |> function [] -> sql.Length | xs -> List.min xs
+                sql.Insert(endIdx, $" {suffix}")
+            else sql
+        | None -> sql
+
 module internal KataUtils =
 
     // Manually convert DateOnly to DateTime and TimeOnly to TimeSpan (until Microsoft.Data.SqlClient handles)

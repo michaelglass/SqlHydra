@@ -22,6 +22,8 @@ let toSql (query: SqlHydra.Query.SelectQuery) =
     let compiled = compiler.Compile(kataQuery)
     // Apply PostgreSQL DISTINCT ON if present
     compiled.Sql <- SqlHydra.Query.DistinctOnStore.applyToSql kataQuery compiled.Sql
+    // Apply PostgreSQL NULLS FIRST/LAST if present
+    compiled.Sql <- SqlHydra.Query.NullsStore.applyToSql kataQuery compiled.Sql
     #if DEBUG
     printfn "toSql: %s" compiled.Sql
     #endif
