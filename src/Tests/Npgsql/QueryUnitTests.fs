@@ -879,6 +879,37 @@ let ``orderByAliasDesc orders by a raw alias descending``() =
     sql.Contains("ORDER BY \"open_rate\" DESC") =! true
 
 [<Test>]
+let ``countDistinct with Value accessor after leftJoin``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin d in sales.salesorderdetail on (o.salesorderid = d.Value.salesorderid)
+            groupBy o.salesorderid
+            select {| id = o.salesorderid; cnt = countDistinct d.Value.salesorderdetailid |}
+        }
+        |> toSql
+    printfn "countDistinct .Value SQL: %s" sql
+    sql.Contains("COUNT(DISTINCT") =! true
+
+[<Test>]
+let ``aggregate select with castAs and caseWhen after leftJoin``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin d in sales.salesorderdetail on (o.salesorderid = d.Value.salesorderid)
+            groupBy o.salesorderid
+            select {| id = o.salesorderid
+                      rate = caseWhen (countDistinct d.Value.salesorderdetailid > 0)
+                               (castAs<float>(countDistinct d.Value.salesorderdetailid) / castAs<float>(countBy o.salesorderid))
+                               0.0 |}
+        }
+        |> toSql
+    printfn "complex agg .Value SQL: %s" sql
+    sql.Contains("CASE WHEN") =! true
+    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("CAST(") =! true
+
+[<Test>]
 let ``having after join with aggregate``() =
     let sql =
         select {
