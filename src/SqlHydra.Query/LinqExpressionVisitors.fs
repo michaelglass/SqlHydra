@@ -464,13 +464,23 @@ let getReverseComparison = getComparison << reverseComparison
 let visitAlias (exp: Expression) =
     let rec visit (exp: Expression) =
         match exp with
+        | null -> notImplMsg "visitAlias: null expression"
         | Member m -> visit m.Expression
         | Parameter p -> p.Name
         | MethodCall m when m.Method.Name.StartsWith("get_Item") ->
             visit m.Object
         | :? System.Linq.Expressions.BlockExpression as block ->
+            // .NET 10 F# compiler may hoist scalar values into block-level assignments.
+            // Walk assignments to find the relevant parameter, then visit the result.
+            for expr in block.Expressions do
+                match expr with
+                | :? System.Linq.Expressions.BinaryExpression as assign when assign.NodeType = ExpressionType.Assign ->
+                    () // Skip assignments — they're variable bindings
+                | _ -> ()
             visit block.Result
-        | _ -> notImpl()
+        | :? System.Linq.Expressions.UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
+            visit u.Operand
+        | _ -> notImplMsg $"visitAlias: unexpected expression type {exp.NodeType} ({exp.GetType().Name})"
     visit exp
 
 /// Converts a SQL function MethodCall expression to a SQL fragment string.

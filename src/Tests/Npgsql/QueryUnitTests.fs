@@ -1856,6 +1856,31 @@ let ``lateralCol references lateral join alias column``() =
     sql.Contains("\"summary\".\"total\"") =! true
 
 [<Test>]
+let ``lateral subquery with correlate leftJoin and aggregate select``() =
+    let lateralQuery =
+        subquery {
+            for gd2 in sales.salesorderheader do
+            correlate u in sales.customer
+            leftJoin doe2 in sales.salesorderdetail on (gd2.salesorderid = doe2.Value.salesorderid)
+            where (gd2.customerid = u.customerid)
+            groupBy gd2.salesorderid
+            select {| delivered = countDistinct gd2.salesorderid
+                      opened = countDistinct doe2.Value.salesorderdetailid |}
+        }
+
+    let sql =
+        select {
+            for u in sales.customer do
+            lateralJoin lateralQuery "user_briefs"
+            select u.customerid
+        }
+        |> toSql
+    printfn "lateral correlate leftJoin SQL: %s" sql
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("\"u\".\"customerid\"") =! true
+
+[<Test>]
 let ``castAs wrapping lateralCol``() =
     let lateralQuery =
         subquery {
