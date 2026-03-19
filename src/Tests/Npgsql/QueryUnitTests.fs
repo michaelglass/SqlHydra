@@ -1748,3 +1748,34 @@ let ``pgvector similarity as 1 minus distance``() =
     sql.Contains("<=>") =! true
     sql.Contains("AS \"Similarity\"") =! true
 
+[<Test>]
+let ``caseWhenMulti with multiple branches``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select (o.customerid, caseWhenMulti [
+                        (o.totaldue > Some 1000m, "premium")
+                        (o.totaldue > Some 100m, "standard")
+                    ] "budget")
+        }
+        |> toSql
+    sql.Contains("CASE") =! true
+    sql.Contains("WHEN") =! true
+    sql.Contains("'premium'") =! true
+    sql.Contains("'standard'") =! true
+    sql.Contains("'budget'") =! true
+
+[<Test>]
+let ``caseWhenMulti with single branch``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select (o.customerid, caseWhenMulti [
+                        (o.totaldue > Some 1000m, "premium")
+                    ] "standard")
+        }
+        |> toSql
+    sql.Contains("CASE WHEN") =! true
+    sql.Contains("'premium'") =! true
+    sql.Contains("'standard'") =! true
+

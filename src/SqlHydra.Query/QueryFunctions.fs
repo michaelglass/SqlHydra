@@ -185,6 +185,10 @@ module CaseWhenFunctions =
     /// Column references are properly qualified. Do not pass unsanitized user input.
     let caseWhen<'T> (condition: bool) (thenValue: 'T) (elseValue: 'T) : 'T = Unchecked.defaultof<'T>
 
+    /// Multi-branch CASE WHEN expression.
+    /// CASE WHEN cond1 THEN val1 WHEN cond2 THEN val2 ... ELSE elseVal END.
+    let caseWhenMulti<'T> (branches: (bool * 'T) list) (elseValue: 'T) : 'T = Unchecked.defaultof<'T>
+
 [<AutoOpen>]
 module ParamFunctions =
     /// Injects an external F# value as a SQL parameter in a SELECT projection.
