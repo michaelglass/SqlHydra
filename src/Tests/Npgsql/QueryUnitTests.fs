@@ -1834,6 +1834,62 @@ let ``caseWhen with aggregate in then value``() =
     sql.Contains("AS \"ItemsOrZero\"") =! true
 
 [<Test>]
+let ``lateralCol references lateral join alias column``() =
+    let lateralQuery =
+        subquery {
+            for d in sales.salesorderdetail do
+            correlate o in sales.salesorderheader
+            where (d.salesorderid = o.salesorderid)
+            groupBy d.salesorderid
+            select {| total = countDistinct d.salesorderdetailid |}
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin lateralQuery "summary"
+            select {| id = o.salesorderid
+                      avg_total = avgBy (lateralCol<int> "summary" "total") |}
+        }
+        |> toSql
+    printfn "lateralCol SQL: %s" sql
+    sql.Contains("\"summary\".\"total\"") =! true
+
+[<Test>]
+let ``PgSqlFn.interval in select projection``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| cutoff = PgSqlFn.now() - PgSqlFn.interval "7 days" |}
+        }
+        |> toSql
+    printfn "INTERVAL SQL: %s" sql
+    sql.Contains("INTERVAL '7 days'") =! true
+
+[<Test>]
+let ``caseWhen with interval comparison via rawExpr``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| recent = caseWhen (o.orderdate > rawExpr<System.DateTime> "NOW() - INTERVAL '7 days'") 1 0 |}
+        }
+        |> toSql
+    printfn "CASE INTERVAL SQL: %s" sql
+    sql.Contains("INTERVAL '7 days'") =! true
+    sql.Contains("CASE WHEN") =! true
+
+[<Test>]
+let ``rawExpr in select projection``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| custom = rawExpr<int> "1 + 1" |}
+        }
+        |> toSql
+    printfn "rawExpr SQL: %s" sql
+    sql.Contains("1 + 1") =! true
+
+[<Test>]
 let ``correlate with multiple leftJoins and aggregates in lateral subquery``() =
     let lateralQuery =
         subquery {

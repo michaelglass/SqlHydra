@@ -205,6 +205,16 @@ module CaseWhenFunctions =
     let caseWhenMulti<'T> (branches: (bool * 'T) list) (elseValue: 'T) : 'T = Unchecked.defaultof<'T>
 
 [<AutoOpen>]
+module RawExprFunctions =
+    /// References a column from a lateral join alias or other raw table alias in a SELECT projection.
+    /// Emits "alias"."column" in the generated SQL.
+    let lateralCol<'T> (alias: string) (column: string) : 'T = Unchecked.defaultof<'T>
+
+    /// Injects a raw SQL expression string into a SELECT projection.
+    /// Use for expressions that have no type-safe equivalent.
+    let rawExpr<'T> (sql: string) : 'T = Unchecked.defaultof<'T>
+
+[<AutoOpen>]
 module ParamFunctions =
     /// Injects an external F# value as a SQL parameter in a SELECT projection.
     /// Use in INSERT ... SELECT to mix table columns with external values.

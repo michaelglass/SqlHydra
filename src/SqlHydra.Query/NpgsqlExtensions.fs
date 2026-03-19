@@ -45,6 +45,9 @@ type PgSqlFn =
     static member make_date(year: int, month: int, day: int) : DateTime = sqlFn
     static member make_time(hour: int, minute: int, second: float) : TimeSpan = sqlFn
 
+    // Interval (emits INTERVAL 'value' — special handling in visitSqlFn)
+    static member interval(value: string) : TimeSpan = sqlFn
+
 type InsertBuilder<'Inserted, 'InsertReturn> with
 
     /// Sets the conflict target to typed column(s).

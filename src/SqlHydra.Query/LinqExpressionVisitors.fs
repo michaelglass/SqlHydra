@@ -496,6 +496,16 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
         let inner = renderExpressionAsSql qualifyColumn parameters m.Arguments.[0]
         let sqlType = sqlTypeForClrType m.Method.ReturnType
         $"CAST({inner} AS {sqlType})"
+    | MethodCall m when m.Method.Name = "lateralCol" && m.Arguments.Count = 2 ->
+        let alias = compileAndEvaluateExpression m.Arguments.[0] :?> string
+        let column = compileAndEvaluateExpression m.Arguments.[1] :?> string
+        $"\"{alias}\".\"{column}\""
+    | MethodCall m when m.Method.Name = "rawExpr" && m.Arguments.Count = 1 ->
+        let sql = compileAndEvaluateExpression m.Arguments.[0] :?> string
+        sql
+    | MethodCall m when m.Method.Name = "interval" && m.Arguments.Count = 1 ->
+        let value = compileAndEvaluateExpression m.Arguments.[0] :?> string
+        $"INTERVAL '{value}'"
     | MethodCall m when m.Method.Name = "caseWhenMulti" ->
         // m.Arguments.[0] is the F# list of (bool * 'T) tuples
         // m.Arguments.[1] is the else value
@@ -579,6 +589,16 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (param
         let inner = renderExpressionAsSql qualifyColumn parameters m.Arguments.[0]
         let sqlType = sqlTypeForClrType m.Method.ReturnType
         $"CAST({inner} AS {sqlType})"
+    | MethodCall m when m.Method.Name = "lateralCol" && m.Arguments.Count = 2 ->
+        let alias = compileAndEvaluateExpression m.Arguments.[0] :?> string
+        let column = compileAndEvaluateExpression m.Arguments.[1] :?> string
+        $"\"{alias}\".\"{column}\""
+    | MethodCall m when m.Method.Name = "rawExpr" && m.Arguments.Count = 1 ->
+        let sql = compileAndEvaluateExpression m.Arguments.[0] :?> string
+        sql
+    | MethodCall m when m.Method.Name = "interval" && m.Arguments.Count = 1 ->
+        let value = compileAndEvaluateExpression m.Arguments.[0] :?> string
+        $"INTERVAL '{value}'"
     | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
         let aggType =
             if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
