@@ -132,8 +132,19 @@ module VisitorPatterns =
         | ExpressionType.Parameter -> Some (exp :?> ParameterExpression)
         | _ -> None
 
+/// Returns true if the type is a scalar (primitive, value type, string, decimal) or an Option/Nullable wrapping a scalar.
+let private isScalarType (t: System.Type) =
+    let unwrapped =
+        if t.IsGenericType then
+            let gtd = t.GetGenericTypeDefinition()
+            if gtd = typedefof<Option<_>> || gtd = typedefof<System.Nullable<_>> then
+                t.GetGenericArguments().[0]
+            else t
+        else t
+    unwrapped.IsPrimitive || unwrapped.IsValueType || unwrapped = typeof<string> || unwrapped = typeof<decimal>
+
 [<AutoOpen>]
-module SqlPatterns = 
+module SqlPatterns =
 
     let (|Not|_|) (exp: Expression) = 
         match exp.NodeType with

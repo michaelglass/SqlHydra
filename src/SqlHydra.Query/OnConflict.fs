@@ -7,13 +7,15 @@ open System
 let insertOrReplace (cmdText: string) =
     cmdText.Replace("INSERT", "INSERT OR REPLACE")
 
+/// Separates an insert query from its optional trailing identity query (split on ";").
+let private splitInsertQuery (cmdText: string) =
+    match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
+    | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
+    | _ -> cmdText, ""
+
 /// Modifies an insert query to "ON CONFLICT TO UPDATE"
 let onConflictDoUpdate (conflictColumns: string list) (updateColumns: string list) (cmdText: string) =
-    // Separate insert query from optional identity query
-    let insertQuery, identityQuery = 
-        match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
-        | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
-        | _ -> cmdText, ""
+    let insertQuery, identityQuery = splitInsertQuery cmdText
 
     // Build upsert clause
     let setLinesStatement = 
@@ -32,10 +34,7 @@ let onConflictDoUpdate (conflictColumns: string list) (updateColumns: string lis
 
 /// Modifies an insert query to "ON CONFLICT DO UPDATE" with COALESCE for specified columns
 let onConflictDoUpdateCoalesce (table: string) (conflictColumns: string list) (updateColumns: string list) (coalesceColumns: string list) (cmdText: string) =
-    let insertQuery, identityQuery =
-        match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
-        | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
-        | _ -> cmdText, ""
+    let insertQuery, identityQuery = splitInsertQuery cmdText
 
     let coalesceSet = Set.ofList coalesceColumns
 
@@ -67,10 +66,7 @@ let onConflictDoUpdateCoalesce (table: string) (conflictColumns: string list) (u
 /// Modifies an insert query to "ON CONFLICT TO NOTHING"
 let onConflictDoNothing (conflictColumns: string list) (cmdText: string) =
     // Separate insert query from optional identity query
-    let insertQuery, identityQuery =
-        match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
-        | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
-        | _ -> cmdText, ""
+    let insertQuery, identityQuery = splitInsertQuery cmdText
 
     // Build upsert clause
     let conflictColumnsCsv = String.Join(",", conflictColumns)
@@ -84,10 +80,7 @@ let onConflictDoNothing (conflictColumns: string list) (cmdText: string) =
 
 /// Modifies an insert query to "ON CONFLICT (raw_target) DO NOTHING" using a raw SQL conflict target
 let onConflictDoNothingRawTarget (rawTarget: string) (cmdText: string) =
-    let insertQuery, identityQuery =
-        match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
-        | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
-        | _ -> cmdText, ""
+    let insertQuery, identityQuery = splitInsertQuery cmdText
 
     Text.StringBuilder()
         .AppendLine(insertQuery)
@@ -99,10 +92,7 @@ let onConflictDoNothingRawTarget (rawTarget: string) (cmdText: string) =
 /// Modifies an insert query to "ON CONFLICT ... WHERE ... DO NOTHING" using a raw SQL WHERE clause
 let onConflictDoNothingWhereRaw (conflictColumns: string list) (whereClause: string) (cmdText: string) =
     // Separate insert query from optional identity query
-    let insertQuery, identityQuery =
-        match cmdText.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
-        | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
-        | _ -> cmdText, ""
+    let insertQuery, identityQuery = splitInsertQuery cmdText
 
     let conflictColumnsCsv = String.Join(",", conflictColumns)
 

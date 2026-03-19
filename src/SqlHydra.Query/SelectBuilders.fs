@@ -239,7 +239,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     state.Query.OrderBy(fqCol)
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
-                    let aggFragment = if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT %s{fqCol})" else $"%s{aggType}(%s{fqCol})"
+                    let aggFragment = LinqExpressionVisitors.SqlPatterns.renderAggregate aggType fqCol
                     state.Query.OrderByRaw(aggFragment)
                 | LinqExpressionVisitors.OrderByIgnored ->
                     state.Query
@@ -261,7 +261,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     state.Query.OrderByDesc(fqCol)
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
-                    let aggFragment = if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT %s{fqCol})" else $"%s{aggType}(%s{fqCol})"
+                    let aggFragment = LinqExpressionVisitors.SqlPatterns.renderAggregate aggType fqCol
                     state.Query.OrderByRaw($"%s{aggFragment} DESC")
                 | LinqExpressionVisitors.OrderByIgnored -> 
                     state.Query
