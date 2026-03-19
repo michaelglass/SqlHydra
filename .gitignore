@@ -55,3 +55,5 @@ Desktop.ini
 plan.md
 .worktrees/
 TestResults/
+still-failing.md
+regression-test-prompt.md

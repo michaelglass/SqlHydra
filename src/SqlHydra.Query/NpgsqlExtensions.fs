@@ -101,7 +101,8 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
             QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
         | None -> failwith "doUpdate requires onConflict or onConflictRaw to be called first"
 
-    /// Conflict action: DO UPDATE SET with COALESCE for specified columns.
+    /// Conflict action: DO UPDATE SET with COALESCE for specified columns (PostgreSQL only).
+    /// Generates: SET col = COALESCE(EXCLUDED."col", "table"."col") — preserves existing value when new is NULL.
     [<CustomOperation("doUpdateCoalesce", MaintainsVariableSpace = true)>]
     member this.DoUpdateCoalesce(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
         [<ProjectionParameter>] updateFields,
