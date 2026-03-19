@@ -119,18 +119,6 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
 /// PostgreSQL-specific extensions for the select builder.
 type SelectBuilder<'Selected, 'Mapped> with
 
-    /// Adds NULLS LAST to the most recent ORDER BY clause (PostgreSQL only)
-    [<CustomOperation("nullsLast", MaintainsVariableSpace = true)>]
-    member this.NullsLast (state: QuerySource<'T, Query>) =
-        NullsStore.set state.Query "NULLS LAST"
-        state
-
-    /// Adds NULLS FIRST to the most recent ORDER BY clause (PostgreSQL only)
-    [<CustomOperation("nullsFirst", MaintainsVariableSpace = true)>]
-    member this.NullsFirst (state: QuerySource<'T, Query>) =
-        NullsStore.set state.Query "NULLS FIRST"
-        state
-
     /// SELECT DISTINCT ON (column) - returns first row per unique value of column (PostgreSQL only)
     [<CustomOperation("distinctOn", MaintainsVariableSpace = true)>]
     member this.DistinctOn (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
