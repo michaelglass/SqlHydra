@@ -471,13 +471,8 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
         let elseValue = renderExpressionAsSql qualifyColumn parameters m.Arguments.[2]
         $"CASE WHEN {condition} THEN {thenValue} ELSE {elseValue} END"
     | MethodCall m when m.Arguments.Count = 2 &&
-                       List.contains m.Method.Name [ "cosine_distance"; "l2_distance"; "inner_product_distance" ] ->
-        let infixOp =
-            match m.Method.Name with
-            | "cosine_distance" -> "<=>"
-            | "l2_distance" -> "<->"
-            | "inner_product_distance" -> "<#>"
-            | _ -> failwith "unreachable"
+                       (InfixOperators.tryGetOperator m.Method.Name).IsSome ->
+        let infixOp = (InfixOperators.tryGetOperator m.Method.Name).Value
         let renderArg (arg: Expression) =
             match arg with
             | Member mem ->

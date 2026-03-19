@@ -2,6 +2,27 @@
 
 open System
 
+/// Registry for SQL functions that should be emitted as infix operators.
+/// Register a function name to emit `left OP right` instead of `fn(left, right)`.
+module InfixOperators =
+    let private registry = System.Collections.Concurrent.ConcurrentDictionary<string, string>()
+
+    /// Register a function name to be emitted as an infix operator.
+    let register (fnName: string) (operator: string) =
+        registry.[fnName] <- operator
+
+    /// Look up whether a function should be emitted as an infix operator.
+    let tryGetOperator (fnName: string) =
+        match registry.TryGetValue(fnName) with
+        | true, op -> Some op
+        | _ -> None
+
+    // Register built-in infix operators (pgvector distance functions)
+    do
+        register "cosine_distance" "<=>"
+        register "l2_distance" "<->"
+        register "inner_product_distance" "<#>"
+
 [<AutoOpen>]
 module Table =
 
