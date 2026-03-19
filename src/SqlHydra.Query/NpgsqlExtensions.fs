@@ -212,7 +212,8 @@ type SelectBuilder<'Selected, 'Mapped> with
         | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
             let fqCol = $"\"{tableAlias}\".\"{p.Name}\""
             QuerySource<'T, Query>(state.Query.OrderByRaw($"{fqCol} <=> ?", [| vector |]), state.TableMappings)
-        | _ -> state
+        | LinqExpressionVisitors.OrderByIgnored -> state
+        | _ -> failwith "pgvector distance ordering requires a column reference, not an aggregate"
 
     /// ORDER BY column <-> @vector (pgvector L2/Euclidean distance, ascending — closest first)
     [<CustomOperation("orderByL2Distance", MaintainsVariableSpace = true)>]
@@ -222,7 +223,8 @@ type SelectBuilder<'Selected, 'Mapped> with
         | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
             let fqCol = $"\"{tableAlias}\".\"{p.Name}\""
             QuerySource<'T, Query>(state.Query.OrderByRaw($"{fqCol} <-> ?", [| vector |]), state.TableMappings)
-        | _ -> state
+        | LinqExpressionVisitors.OrderByIgnored -> state
+        | _ -> failwith "pgvector distance ordering requires a column reference, not an aggregate"
 
     /// ORDER BY column <#> @vector (pgvector inner product distance, ascending)
     [<CustomOperation("orderByInnerProductDistance", MaintainsVariableSpace = true)>]
@@ -232,5 +234,6 @@ type SelectBuilder<'Selected, 'Mapped> with
         | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
             let fqCol = $"\"{tableAlias}\".\"{p.Name}\""
             QuerySource<'T, Query>(state.Query.OrderByRaw($"{fqCol} <#> ?", [| vector |]), state.TableMappings)
-        | _ -> state
+        | LinqExpressionVisitors.OrderByIgnored -> state
+        | _ -> failwith "pgvector distance ordering requires a column reference, not an aggregate"
 

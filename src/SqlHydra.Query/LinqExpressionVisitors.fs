@@ -534,8 +534,7 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (param
         | Member mem ->
             let alias = visitAlias mem.Expression
             let fqCol = qualifyColumn alias mem.Member
-            if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT {fqCol})"
-            else $"{aggType}({fqCol})"
+            renderAggregate aggType fqCol
         | _ -> notImplMsg $"Unsupported argument to aggregate in CASE WHEN"
     | MethodCall _ as nested -> visitSqlFn qualifyColumn parameters nested
     | Unary u when u.NodeType = ExpressionType.Convert -> renderExpressionAsSql qualifyColumn parameters u.Operand
@@ -844,35 +843,40 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                     query.Where(fqCol, reversedComparison, queryParameter)
 
             // SQL function compared to value
-            | NMethodCall _, NValue value ->
-                let sqlFragment = nVisitSqlFn qualifyColumn left
-                query.WhereRaw($"{sqlFragment} {comparison} ?", [| value |])
+            | NMethodCall(m, _), NValue value ->
+                let parms = ResizeArray<obj>()
+                let sqlFragment = visitSqlFn qualifyColumn parms (m :> Expression)
+                query.WhereRaw($"{sqlFragment} {comparison} ?", [| yield! parms; yield value |])
 
             // Value compared to SQL function
-            | NValue value, NMethodCall _ ->
-                let sqlFragment = nVisitSqlFn qualifyColumn right
+            | NValue value, NMethodCall(m, _) ->
+                let parms = ResizeArray<obj>()
+                let sqlFragment = visitSqlFn qualifyColumn parms (m :> Expression)
                 let reversedComparison = getReverseComparison op
-                query.WhereRaw($"{sqlFragment} {reversedComparison} ?", [| value |])
+                query.WhereRaw($"{sqlFragment} {reversedComparison} ?", [| yield! parms; yield value |])
 
             // SQL function compared to column
-            | NMethodCall _, NColumn (p, _) ->
-                let sqlFragment = nVisitSqlFn qualifyColumn left
+            | NMethodCall(m, _), NColumn (p, _) ->
+                let parms = ResizeArray<obj>()
+                let sqlFragment = visitSqlFn qualifyColumn parms (m :> Expression)
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
-                query.WhereRaw($"{sqlFragment} {comparison} {fqCol}")
+                query.WhereRaw($"{sqlFragment} {comparison} {fqCol}", parms.ToArray())
 
             // Column compared to SQL function
-            | NColumn (p, _), NMethodCall _ ->
+            | NColumn (p, _), NMethodCall(m, _) ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
-                let sqlFragment = nVisitSqlFn qualifyColumn right
-                query.WhereRaw($"{fqCol} {comparison} {sqlFragment}")
+                let parms = ResizeArray<obj>()
+                let sqlFragment = visitSqlFn qualifyColumn parms (m :> Expression)
+                query.WhereRaw($"{fqCol} {comparison} {sqlFragment}", parms.ToArray())
 
             // SQL function compared to SQL function
-            | NMethodCall _, NMethodCall _ ->
-                let sqlFragment1 = nVisitSqlFn qualifyColumn left
-                let sqlFragment2 = nVisitSqlFn qualifyColumn right
-                query.WhereRaw($"{sqlFragment1} {comparison} {sqlFragment2}")
+            | NMethodCall(m1, _), NMethodCall(m2, _) ->
+                let parms = ResizeArray<obj>()
+                let sqlFragment1 = visitSqlFn qualifyColumn parms (m1 :> Expression)
+                let sqlFragment2 = visitSqlFn qualifyColumn parms (m2 :> Expression)
+                query.WhereRaw($"{sqlFragment1} {comparison} {sqlFragment2}", parms.ToArray())
 
             // Anti-join pattern: `where (d = None)` or `where (d <> None)` on a left-joined table parameter
             // F# compiles `None` as a method call (FSharpOption.get_None()), not as Constant null
@@ -2072,8 +2076,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
                 | Member mem ->
                     let alias = resolveAliasFromExpr mem.Expression
                     let fqCol = qualifyCol alias mem.Member
-                    if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT {fqCol})"
-                    else $"{aggType}({fqCol})"
+                    renderAggregate aggType fqCol
                 | _ -> notImplMsg $"Unsupported argument to aggregate in CASE WHEN"
             | MethodCall _ as nested -> visitSqlFnWithProvenance nested
             | Unary u when u.NodeType = ExpressionType.Convert -> renderExprAsSqlProv u.Operand

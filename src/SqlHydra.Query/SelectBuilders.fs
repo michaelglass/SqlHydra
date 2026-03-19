@@ -107,8 +107,12 @@ type SelectBuilder<'Selected, 'Mapped> () =
     let mergeTableMappings (a: Map<TableMappingKey, TableMapping>, b: Map<TableMappingKey, TableMapping>) =
         Map (Seq.concat [ (Map.toSeq a); (Map.toSeq b) ])
             
-    let qualifyColumnWithAlias (alias: string) (col: Reflection.MemberInfo) = 
+    let qualifyColumnWithAlias (alias: string) (col: Reflection.MemberInfo) =
         $"%s{alias}.%s{col.Name}"
+
+    let qualifiedTableName (tbl: TableMapping) =
+        if tbl.Schema = "" then tbl.Name
+        else $"{tbl.Schema}.{tbl.Name}"
 
     member val MapFn = Option<Func<'Selected, 'Mapped>>.None with get, set
     member val CancellationToken = CancellationToken.None with get, set
@@ -405,9 +409,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         // Get inner table info
         let innerTable = mergedTables[TableAliasKey innerAlias]
-        let tableName =
-            if innerTable.Schema = "" then innerTable.Name
-            else $"{innerTable.Schema}.{innerTable.Name}"
+        let tableName = qualifiedTableName innerTable
 
         let pendingJoin = {
             JoinType = JoinType.Inner
@@ -439,9 +441,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         // Get inner table info
         let innerTable = mergedTables[TableAliasKey innerAlias]
-        let tableName =
-            if innerTable.Schema = "" then innerTable.Name
-            else $"{innerTable.Schema}.{innerTable.Name}"
+        let tableName = qualifiedTableName innerTable
 
         let pendingJoin = {
             JoinType = JoinType.Left
