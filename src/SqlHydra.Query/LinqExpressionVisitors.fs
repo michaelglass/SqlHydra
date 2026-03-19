@@ -462,25 +462,40 @@ let reverseComparison (expType: ExpressionType) =
 let getReverseComparison = getComparison << reverseComparison
     
 let visitAlias (exp: Expression) =
+    let breadcrumbs = ResizeArray<string>()
     let rec visit (exp: Expression) =
         match exp with
-        | null -> notImplMsg "visitAlias: null expression"
-        | Member m -> visit m.Expression
+        | null ->
+            let trail = breadcrumbs |> String.concat " -> "
+            notImplMsg $"visitAlias: null expression. Trail: {trail}"
+        | Member m ->
+            let exprType = if m.Expression <> null then m.Expression.NodeType.ToString() else "NULL"
+            breadcrumbs.Add(sprintf "Member(%s, expr=%s)" m.Member.Name exprType)
+            visit m.Expression
         | Parameter p -> p.Name
         | MethodCall m when m.Method.Name.StartsWith("get_Item") ->
+            let objType = if m.Object <> null then m.Object.NodeType.ToString() else "NULL"
+            breadcrumbs.Add(sprintf "Call(%s, obj=%s)" m.Method.Name objType)
             visit m.Object
         | :? System.Linq.Expressions.BlockExpression as block ->
+            let varNames = block.Variables |> Seq.map (fun v -> sprintf "%s:%s" v.Name v.Type.Name) |> String.concat ", "
+            breadcrumbs.Add(sprintf "Block(vars=[%s], exprs=%d, result=%O)" varNames block.Expressions.Count block.Result.NodeType)
             // .NET 10 F# compiler may hoist scalar values into block-level assignments.
-            // Walk assignments to find the relevant parameter, then visit the result.
             for expr in block.Expressions do
                 match expr with
                 | :? System.Linq.Expressions.BinaryExpression as assign when assign.NodeType = ExpressionType.Assign ->
-                    () // Skip assignments — they're variable bindings
+                    match assign.Left with
+                    | :? System.Linq.Expressions.ParameterExpression as p ->
+                        breadcrumbs.Add(sprintf "  Assign(%s:%s = %O)" p.Name p.Type.Name assign.Right.NodeType)
+                    | _ -> ()
                 | _ -> ()
             visit block.Result
         | :? System.Linq.Expressions.UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
+            breadcrumbs.Add(sprintf "Convert(%O)" u.Operand.NodeType)
             visit u.Operand
-        | _ -> notImplMsg $"visitAlias: unexpected expression type {exp.NodeType} ({exp.GetType().Name})"
+        | _ ->
+            let trail = breadcrumbs |> String.concat " -> "
+            notImplMsg $"visitAlias: unexpected {exp.NodeType} ({exp.GetType().Name}). Trail: {trail}"
     visit exp
 
 /// Converts a SQL function MethodCall expression to a SQL fragment string.
@@ -587,6 +602,8 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (param
     | Member mem when mem.Expression <> null ->
         let alias = visitAlias mem.Expression
         qualifyColumn alias mem.Member
+    | Member mem ->
+        notImplMsg $"renderExpressionAsSql: Member '{mem.Member.Name}' (declaring type: {mem.Member.DeclaringType.Name}) has null Expression. This may be a .NET 10 expression tree issue with deeply nested tuple destructuring."
     | Constant c when c.Value = null -> "NULL"
     | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
     | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
