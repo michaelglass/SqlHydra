@@ -61,27 +61,36 @@ type SqlFn =
 
 type InsertBuilder<'Inserted, 'InsertReturn> with
 
-    /// Performs an update on one or more update fields if a conflict occurs.
-    [<CustomOperation("onConflictDoUpdate", MaintainsVariableSpace = true)>]
-    member this.OnConflictDoUpdate(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, 
-        [<ProjectionParameter>] conflictFieldsSelector, 
-        [<ProjectionParameter>] updateFieldsSelector) = 
-        
+    /// Sets the conflict target to typed column(s).
+    [<CustomOperation("onConflict", MaintainsVariableSpace = true)>]
+    member this.OnConflict(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFieldsSelector) =
         let spec = state.Query
         let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFieldsSelector (fun tblAlias p -> p.Name)
-        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFieldsSelector (fun tblAlias p -> p.Name)
-        let newSpec = { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields) }
+        let newSpec = { spec with ConflictTarget = Some (TypedColumns conflictFields) }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
 
-    /// Insert is ignored if a conflict occurs.
-    [<CustomOperation("onConflictDoNothing", MaintainsVariableSpace = true)>]
-    member this.OnConflictDoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, 
-        [<ProjectionParameter>] conflictFieldsSelector) = 
-        
+    /// Conflict action: DO NOTHING.
+    [<CustomOperation("doNothing", MaintainsVariableSpace = true)>]
+    member this.DoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>) =
         let spec = state.Query
-        let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFieldsSelector (fun tblAlias p -> p.Name)
-        let newSpec = { spec with InsertType = OnConflictDoNothing conflictFields }
-        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+        match spec.ConflictTarget with
+        | Some target ->
+            let newSpec = { spec with InsertType = OnConflict (target, DoNothing); ConflictTarget = None }
+            QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+        | None -> failwith "doNothing requires onConflict to be called first"
+
+    /// Conflict action: DO UPDATE SET col=EXCLUDED.col for each update field.
+    [<CustomOperation("doUpdate", MaintainsVariableSpace = true)>]
+    member this.DoUpdate(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] updateFieldsSelector) =
+        let spec = state.Query
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFieldsSelector (fun tblAlias p -> p.Name)
+        match spec.ConflictTarget with
+        | Some target ->
+            let newSpec = { spec with InsertType = OnConflict (target, DoUpdate updateFields); ConflictTarget = None }
+            QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+        | None -> failwith "doUpdate requires onConflict to be called first"
 
     /// Deletes and re-inserts a record if a primary key conflict occurs.
     [<CustomOperation("insertOrReplace", MaintainsVariableSpace = true)>]
