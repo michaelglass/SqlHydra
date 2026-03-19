@@ -1856,6 +1856,52 @@ let ``lateralCol references lateral join alias column``() =
     sql.Contains("\"summary\".\"total\"") =! true
 
 [<Test>]
+let ``castAs wrapping lateralCol``() =
+    let lateralQuery =
+        subquery {
+            for d in sales.salesorderdetail do
+            correlate o in sales.salesorderheader
+            where (d.salesorderid = o.salesorderid)
+            groupBy d.salesorderid
+            select {| cnt = countDistinct d.salesorderdetailid |}
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin lateralQuery "summary"
+            select {| rate = castAs<float>(lateralCol<int> "summary" "cnt") |}
+        }
+        |> toSql
+    printfn "castAs lateralCol SQL: %s" sql
+    sql.Contains("CAST(") =! true
+    sql.Contains("\"summary\".\"cnt\"") =! true
+
+[<Test>]
+let ``castAs lateralCol division``() =
+    let lateralQuery =
+        subquery {
+            for d in sales.salesorderdetail do
+            correlate o in sales.salesorderheader
+            where (d.salesorderid = o.salesorderid)
+            groupBy d.salesorderid
+            select {| opened = countDistinct d.salesorderdetailid; delivered = countBy d.salesorderid |}
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin lateralQuery "user_briefs"
+            select {| avgRate = avgBy (caseWhen (lateralCol<int> "user_briefs" "delivered" > 0)
+                                         (castAs<float>(lateralCol<int> "user_briefs" "opened") / castAs<float>(lateralCol<int> "user_briefs" "delivered"))
+                                         0.0) |}
+        }
+        |> toSql
+    printfn "castAs lateralCol division SQL: %s" sql
+    sql.Contains("CAST(") =! true
+    sql.Contains("\"user_briefs\"") =! true
+
+[<Test>]
 let ``PgSqlFn.interval in select projection``() =
     let sql =
         select {
