@@ -3,9 +3,14 @@
 open Swensen.Unquote
 open SqlHydra.Query
 open SqlHydra.Query.NpgsqlExtensions
+open SqlHydra.Query.Pgvector.PgvectorExtensions
 open type SqlHydra.Query.SqlFn
 open type PgSqlFn
+open type PgvectorFn
 open NUnit.Framework
+
+// Ensure pgvector infix operators are registered before any tests run
+do ensureRegistered()
 open DB
 #if NET8_0
 open Npgsql.AdventureWorksNet8
@@ -943,7 +948,7 @@ let ``infix operator wrapped in parentheses``() =
     let sql =
         select {
             for o in sales.salesorderheader do
-            select {| val1 = 1.0 - PgSqlFn.cosine_distance(o.subtotal, inlineValue 1.0m) |}
+            select {| val1 = 1.0 - PgvectorFn.cosine_distance(o.subtotal, inlineValue 1.0m) |}
         }
         |> toSql
     printfn "INFIX PARENS SQL: %s" sql

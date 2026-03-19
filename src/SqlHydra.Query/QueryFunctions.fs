@@ -17,12 +17,6 @@ module InfixOperators =
         | true, op -> Some op
         | _ -> None
 
-    // Register built-in infix operators (pgvector distance functions)
-    do
-        register "cosine_distance" "<=>"
-        register "l2_distance" "<->"
-        register "inner_product_distance" "<#>"
-
 [<AutoOpen>]
 module Table =
 

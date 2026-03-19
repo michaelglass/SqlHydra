@@ -23,6 +23,7 @@
 
 	<ItemGroup>
 		<InternalsVisibleTo Include="Tests" />
+		<InternalsVisibleTo Include="SqlHydra.Query.Pgvector" />
 	</ItemGroup>
 
 	<ItemGroup>

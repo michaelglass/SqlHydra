@@ -88,6 +88,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\SqlHydra.Query\SqlHydra.Query.fsproj" />
+    <ProjectReference Include="..\SqlHydra.Query.Pgvector\SqlHydra.Query.Pgvector.fsproj" />
     <ProjectReference Include="..\SqlHydra.Cli\SqlHydra.Cli.fsproj" />
   </ItemGroup>
   <ItemGroup>
