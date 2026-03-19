@@ -88,14 +88,20 @@ type LoggedSqlResult(r: SqlResult) =
             sb.AppendLine($"- {kvp.Key}: {kvp.Value}") |> ignore
         sb.ToString()
 
+type ConflictTarget =
+    | TypedColumns of columns: string list
+    | TypedColumnsWhereRaw of columns: string list * whereClause: string
+    | RawTarget of rawTarget: string
+
+type ConflictAction =
+    | DoNothing
+    | DoUpdate of updateFields: string list
+    | DoUpdateCoalesce of updateFields: string list * coalesceFields: string list
+
 type InsertType =
     | Insert
     | InsertOrReplace
-    | OnConflictDoUpdate of conflictFields: string list * updateFields: string list
-    | OnConflictDoUpdateCoalesce of conflictFields: string list * updateFields: string list * coalesceFields: string list
-    | OnConflictDoNothing of conflictFields: string list
-    | OnConflictDoNothingWhereRaw of conflictFields: string list * whereClause: string
-    | OnConflictDoNothingRawTarget of rawTarget: string
+    | OnConflict of target: ConflictTarget * action: ConflictAction
     | InsertOrUpdateOnUnique of keyFields: string list * updateFields: string list
     | InsertFromSelect of selectQuery: SqlKata.Query
 
@@ -107,9 +113,10 @@ type InsertQuerySpec<'T, 'Identity> =
         IdentityField: string option
         OutputFields: OutputField list
         InsertType: InsertType
+        ConflictTarget: ConflictTarget option
     }
-    static member Default : InsertQuerySpec<'T, 'Identity> = 
-        { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []; InsertType = Insert }
+    static member Default : InsertQuerySpec<'T, 'Identity> =
+        { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []; InsertType = Insert; ConflictTarget = None }
 
 and OutputField = 
     {

@@ -1,4 +1,4 @@
-﻿/// Implementations for OnConflictDoUpdate, OnConflictDoNothing and InsertOrReplace.
+/// Implementations for OnConflict and InsertOrReplace.
 module internal SqlHydra.Query.OnConflict
 
 open System
@@ -13,94 +13,51 @@ let private splitInsertQuery (cmdText: string) =
     | [| insertQuery; identityQuery |] -> insertQuery, identityQuery
     | _ -> cmdText, ""
 
-/// Modifies an insert query to "ON CONFLICT TO UPDATE"
-let onConflictDoUpdate (conflictColumns: string list) (updateColumns: string list) (cmdText: string) =
+/// Renders the conflict target clause: ON CONFLICT(...)
+let private renderTarget (target: ConflictTarget) =
+    match target with
+    | TypedColumns columns ->
+        let csv = String.Join(",", columns)
+        $"ON CONFLICT({csv})"
+    | TypedColumnsWhereRaw (columns, whereClause) ->
+        let csv = String.Join(",", columns)
+        $"ON CONFLICT({csv}) WHERE {whereClause}"
+    | RawTarget rawTarget ->
+        $"ON CONFLICT({rawTarget})"
+
+/// Renders the conflict action clause: DO NOTHING / DO UPDATE SET ...
+let private renderAction (table: string) (action: ConflictAction) =
+    match action with
+    | DoNothing -> "DO NOTHING"
+    | DoUpdate updateFields ->
+        let setLines =
+            updateFields
+            |> List.map (fun colNm -> $"{colNm}=EXCLUDED.\"{colNm}\"")
+            |> (fun lines -> String.Join(",\n", lines))
+        $"DO UPDATE SET\n{setLines}"
+    | DoUpdateCoalesce (updateFields, coalesceFields) ->
+        let coalesceSet = Set.ofList coalesceFields
+        let quotedTable =
+            table.Split('.')
+            |> Array.map (fun part -> $"\"{part}\"")
+            |> (fun parts -> String.Join(".", parts))
+        let setLines =
+            updateFields
+            |> List.map (fun colNm ->
+                if coalesceSet.Contains colNm then
+                    $"{colNm}=COALESCE(EXCLUDED.\"{colNm}\", {quotedTable}.\"{colNm}\")"
+                else
+                    $"{colNm}=EXCLUDED.\"{colNm}\""
+            )
+            |> (fun lines -> String.Join(",\n", lines))
+        $"DO UPDATE SET\n{setLines}"
+
+/// Applies a conflict target + action to a compiled INSERT command text.
+let applyConflict (table: string) (target: ConflictTarget) (action: ConflictAction) (cmdText: string) =
     let insertQuery, identityQuery = splitInsertQuery cmdText
-
-    // Build upsert clause
-    let setLinesStatement = 
-        updateColumns
-        |> List.map (fun colNm -> $"{colNm}=EXCLUDED.\"{colNm}\"\n")
-        |> (fun lines -> String.Join(",", lines))
-            
-    let conflictColumnsCsv = String.Join(",", conflictColumns)
-
     Text.StringBuilder()
         .AppendLine(insertQuery)
-        .AppendLine($"ON CONFLICT({conflictColumnsCsv}) DO UPDATE SET")
-        .AppendLine(setLinesStatement).Append(";")
+        .AppendLine(renderTarget target)
+        .AppendLine(renderAction table action).Append(";")
         .AppendLine(identityQuery)
         .ToString()
-
-/// Modifies an insert query to "ON CONFLICT DO UPDATE" with COALESCE for specified columns
-let onConflictDoUpdateCoalesce (table: string) (conflictColumns: string list) (updateColumns: string list) (coalesceColumns: string list) (cmdText: string) =
-    let insertQuery, identityQuery = splitInsertQuery cmdText
-
-    let coalesceSet = Set.ofList coalesceColumns
-
-    // Quote the table name parts for use in column qualification
-    let quotedTable =
-        table.Split('.')
-        |> Array.map (fun part -> $"\"{part}\"")
-        |> (fun parts -> String.Join(".", parts))
-
-    let setLinesStatement =
-        updateColumns
-        |> List.map (fun colNm ->
-            if coalesceSet.Contains colNm then
-                $"{colNm}=COALESCE(EXCLUDED.\"{colNm}\", {quotedTable}.\"{colNm}\")\n"
-            else
-                $"{colNm}=EXCLUDED.\"{colNm}\"\n"
-        )
-        |> (fun lines -> String.Join(",", lines))
-
-    let conflictColumnsCsv = String.Join(",", conflictColumns)
-
-    Text.StringBuilder()
-        .AppendLine(insertQuery)
-        .AppendLine($"ON CONFLICT({conflictColumnsCsv}) DO UPDATE SET")
-        .AppendLine(setLinesStatement).Append(";")
-        .AppendLine(identityQuery)
-        .ToString()
-
-/// Modifies an insert query to "ON CONFLICT TO NOTHING"
-let onConflictDoNothing (conflictColumns: string list) (cmdText: string) =
-    // Separate insert query from optional identity query
-    let insertQuery, identityQuery = splitInsertQuery cmdText
-
-    // Build upsert clause
-    let conflictColumnsCsv = String.Join(",", conflictColumns)
-
-    Text.StringBuilder()
-        .AppendLine(insertQuery)
-        .AppendLine($"ON CONFLICT({conflictColumnsCsv})")
-        .AppendLine("DO NOTHING;")
-        .AppendLine(identityQuery)
-        .ToString()
-
-/// Modifies an insert query to "ON CONFLICT (raw_target) DO NOTHING" using a raw SQL conflict target
-let onConflictDoNothingRawTarget (rawTarget: string) (cmdText: string) =
-    let insertQuery, identityQuery = splitInsertQuery cmdText
-
-    Text.StringBuilder()
-        .AppendLine(insertQuery)
-        .AppendLine($"ON CONFLICT({rawTarget})")
-        .AppendLine("DO NOTHING;")
-        .AppendLine(identityQuery)
-        .ToString()
-
-/// Modifies an insert query to "ON CONFLICT ... WHERE ... DO NOTHING" using a raw SQL WHERE clause
-let onConflictDoNothingWhereRaw (conflictColumns: string list) (whereClause: string) (cmdText: string) =
-    // Separate insert query from optional identity query
-    let insertQuery, identityQuery = splitInsertQuery cmdText
-
-    let conflictColumnsCsv = String.Join(",", conflictColumns)
-
-    Text.StringBuilder()
-        .AppendLine(insertQuery)
-        .AppendLine($"ON CONFLICT({conflictColumnsCsv}) WHERE {whereClause}")
-        .AppendLine("DO NOTHING;")
-        .AppendLine(identityQuery)
-        .ToString()
-
-

@@ -285,11 +285,7 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         let applyOnConflict =
             match iq.Spec.InsertType with
             | InsertOrReplace -> OnConflict.insertOrReplace
-            | OnConflictDoUpdate (conflictFields, updateFields) -> OnConflict.onConflictDoUpdate conflictFields updateFields
-            | OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) -> OnConflict.onConflictDoUpdateCoalesce iq.Spec.Table conflictFields updateFields coalesceFields
-            | OnConflictDoNothing conflictFields -> OnConflict.onConflictDoNothing conflictFields
-            | OnConflictDoNothingWhereRaw (conflictFields, whereClause) -> OnConflict.onConflictDoNothingWhereRaw conflictFields whereClause
-            | OnConflictDoNothingRawTarget rawTarget -> OnConflict.onConflictDoNothingRawTarget rawTarget
+            | OnConflict (target, action) -> OnConflict.applyConflict iq.Spec.Table target action
             | Insert -> id
             | InsertOrUpdateOnUnique _ -> id // handled above
             | InsertFromSelect _ -> id
