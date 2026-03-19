@@ -1919,6 +1919,20 @@ let ``lateral subquery with correlate leftJoin and aggregate select``() =
     sql.Contains("\"u\".\"customerid\"") =! true
 
 [<Test>]
+let ``static field in caseWhen requires inlineValue``() =
+    // Guid.Empty is a static field — MemberExpression.Expression is null for statics,
+    // which crashes visitAlias. Wrapping in inlineValue emits it as a parameter instead.
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin d in sales.salesorderdetail on (o.salesorderid = d.Value.salesorderid)
+            select {| id = countDistinct (caseWhen (d.Value.unitprice > 0m) d.Value.salesorderdetailid (inlineValue 0)) |}
+        }
+        |> toSql
+    sql.Contains("COUNT(DISTINCT CASE WHEN") =! true
+    sql.Contains("ELSE @p") =! true
+
+[<Test>]
 let ``countDistinct .Value after 5 leftJoin``() =
     let sql =
         select {
