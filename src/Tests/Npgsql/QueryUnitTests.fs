@@ -1919,17 +1919,29 @@ let ``lateral subquery with correlate leftJoin and aggregate select``() =
     sql.Contains("\"u\".\"customerid\"") =! true
 
 [<Test>]
-let ``static field in caseWhen requires inlineValue``() =
-    // Guid.Empty is a static field — MemberExpression.Expression is null for statics,
-    // which crashes visitAlias. Wrapping in inlineValue emits it as a parameter instead.
+let ``static fields in caseWhen auto-parameterized``() =
+    // Static fields (Guid.Empty, DateTime.MinValue, etc.) have null MemberExpression.Expression.
+    // The visitor now auto-evaluates them and emits as parameters — no inlineValue needed.
     let sql =
         select {
             for o in sales.salesorderheader do
             leftJoin d in sales.salesorderdetail on (o.salesorderid = d.Value.salesorderid)
-            select {| id = countDistinct (caseWhen (d.Value.unitprice > 0m) d.Value.salesorderdetailid (inlineValue 0)) |}
+            select {| id = countDistinct (caseWhen (d.Value.unitprice > 0m) d.Value.salesorderdetailid 0) |}
         }
         |> toSql
     sql.Contains("COUNT(DISTINCT CASE WHEN") =! true
+    sql.Contains("ELSE 0") =! true
+
+[<Test>]
+let ``Guid.Empty in caseWhen emits as parameter``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| id = caseWhen (o.onlineorderflag = true) o.rowguid System.Guid.Empty |}
+        }
+        |> toSql
+    printfn "Guid.Empty SQL: %s" sql
+    sql.Contains("CASE WHEN") =! true
     sql.Contains("ELSE @p") =! true
 
 [<Test>]

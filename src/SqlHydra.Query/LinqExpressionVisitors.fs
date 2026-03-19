@@ -551,9 +551,13 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
         let infixOp = (InfixOperators.tryGetOperator m.Method.Name).Value
         let renderArg (arg: Expression) =
             match arg with
-            | Member mem ->
+            | Member mem when mem.Expression <> null ->
                 let alias = visitAlias mem.Expression
                 qualifyColumn alias mem.Member
+            | Member mem ->
+                let value = System.Linq.Expressions.Expression.Lambda(mem).Compile().DynamicInvoke()
+                parameters.Add(if isNull value then box System.DBNull.Value else value)
+                "?"
             | MethodCall mc when mc.Method.Name = "inlineValue" && mc.Arguments.Count = 1 ->
                 let value = compileAndEvaluateExpression mc.Arguments.[0]
                 parameters.Add(value)
@@ -570,9 +574,13 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
             m.Arguments
             |> Seq.map (fun arg ->
                 match arg with
-                | Member mem ->
+                | Member mem when mem.Expression <> null ->
                     let alias = visitAlias mem.Expression
                     qualifyColumn alias mem.Member
+                | Member mem ->
+                    let value = System.Linq.Expressions.Expression.Lambda(mem).Compile().DynamicInvoke()
+                    parameters.Add(if isNull value then box System.DBNull.Value else value)
+                    "?"
                 | Constant c when c.Value = null ->
                     "NULL"
                 | Constant c when c.Type = typeof<string> ->
@@ -603,7 +611,10 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (param
         let alias = visitAlias mem.Expression
         qualifyColumn alias mem.Member
     | Member mem ->
-        notImplMsg $"renderExpressionAsSql: Member '{mem.Member.Name}' (declaring type: {mem.Member.DeclaringType.Name}) has null Expression. This may be a .NET 10 expression tree issue with deeply nested tuple destructuring."
+        // Static field (Guid.Empty, DateTime.MinValue, String.Empty, etc.) — evaluate and emit as parameter
+        let value = System.Linq.Expressions.Expression.Lambda(mem).Compile().DynamicInvoke()
+        parameters.Add(if isNull value then box System.DBNull.Value else value)
+        "?"
     | Constant c when c.Value = null -> "NULL"
     | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
     | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
