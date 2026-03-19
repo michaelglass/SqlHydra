@@ -295,7 +295,19 @@ module SqlPatterns =
                 else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
-            | _ -> notImplMsg "Invalid argument to aggregate function."
+            | _ -> None
+        | _ -> None
+
+    /// Matches aggregate functions with expression arguments (caseWhen, nested aggregates, etc.)
+    let (|AggregateExpression|_|) (exp: Expression) =
+        match exp with
+        | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
+            let aggType =
+                if m.Method.Name = nameof countDistinct then "COUNTDISTINCT"
+                else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+            match m.Arguments.[0] with
+            | Property _ -> None // handled by AggregateColumn
+            | arg -> Some (aggType, arg)
         | _ -> None
 
 // ─── NormalizedExpression Patterns ───────────────────────────────────────────
@@ -537,8 +549,10 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
                     parameters.Add(value)
                     "?"
                 | MethodCall _ as nested ->
-                    // Handle nested function calls
-                    visitSqlFn qualifyColumn parameters nested
+                    // Handle nested function calls and aggregates
+                    renderExpressionAsSql qualifyColumn parameters nested
+                | Unary u when u.NodeType = ExpressionType.Convert ->
+                    renderExpressionAsSql qualifyColumn parameters u.Operand
                 | _ ->
                     notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
             )
@@ -574,7 +588,9 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (param
             let alias = visitAlias mem.Expression
             let fqCol = qualifyColumn alias mem.Member
             renderAggregate aggType fqCol
-        | _ -> notImplMsg $"Unsupported argument to aggregate in CASE WHEN"
+        | innerExpr ->
+            let innerSql = renderExpressionAsSql qualifyColumn parameters innerExpr
+            renderAggregate aggType innerSql
     | MethodCall _ as nested -> visitSqlFn qualifyColumn parameters nested
     | Unary u when u.NodeType = ExpressionType.Convert -> renderExpressionAsSql qualifyColumn parameters u.Operand
     | Binary b ->
@@ -1425,6 +1441,19 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
             let alias = visitAlias p.Expression
             let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
             [ SelectedExpression (renderAggregate aggType fqCol, None, [||]) ]
+        | NMethodCall(m, args) when
+            List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ]
+            && args.Length = 1
+            && (match args.[0] with NMemberAccess _ -> false | _ -> true) ->
+            // Aggregate with complex (non-column) argument: e.g., countDistinct(caseWhen(...))
+            let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
+            let parms = ResizeArray<obj>()
+            let innerSql = renderExpressionAsSql qualifyCol parms m.Arguments.[0]
+            let aggType =
+                if m.Method.Name = nameof countDistinct then "COUNTDISTINCT"
+                else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+            let sql = renderAggregate aggType innerSql
+            [ SelectedExpression (sql, None, parms.ToArray()) ]
         | NMethodCall(m, args) when m.Method.Name = "inlineValue" && args.Length = 1 ->
             let value = compileAndEvaluateExpression m.Arguments.[0]
             [ SelectedParameter (value, None) ]

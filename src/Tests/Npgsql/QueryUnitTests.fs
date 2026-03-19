@@ -903,6 +903,44 @@ let ``castAs on aggregate in select``() =
     sql.Contains("/") =! true
 
 [<Test>]
+let ``SUM of CASE WHEN in select``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            groupBy o.customerid
+            select {| activeTotal = sumBy (caseWhen (o.status = 5s) o.subtotal 0m) |}
+        }
+        |> toSql
+    printfn "SUM CASE SQL: %s" sql
+    sql.Contains("SUM(CASE WHEN") =! true
+    sql.Contains("THEN") =! true
+    sql.Contains("ELSE") =! true
+
+[<Test>]
+let ``COALESCE wrapping SUM of CASE WHEN``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            groupBy o.customerid
+            select {| total = SqlFn.coalesce(sumBy (caseWhen (o.status = 5s) o.subtotal 0m), 0m) |}
+        }
+        |> toSql
+    printfn "COALESCE SUM SQL: %s" sql
+    sql.Contains("coalesce(SUM(CASE WHEN") =! true
+
+[<Test>]
+let ``COUNT DISTINCT of CASE WHEN``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            groupBy o.customerid
+            select {| unique = countDistinct (caseWhen (o.status = 5s) o.salesorderid 0) |}
+        }
+        |> toSql
+    printfn "COUNT DISTINCT CASE SQL: %s" sql
+    sql.Contains("COUNT(DISTINCT CASE WHEN") =! true
+
+[<Test>]
 let ``aggregate arithmetic in select``() =
     let sql =
         select {
