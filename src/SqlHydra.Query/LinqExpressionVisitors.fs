@@ -584,7 +584,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
 /// Renders an expression tree node as a raw SQL fragment (for CASE WHEN conditions etc.)
 and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (parameters: ResizeArray<obj>) (exp: Expression) : string =
     match exp with
-    | Member mem ->
+    | Member mem when mem.Expression <> null ->
         let alias = visitAlias mem.Expression
         qualifyColumn alias mem.Member
     | Constant c when c.Value = null -> "NULL"

@@ -1919,6 +1919,27 @@ let ``lateral subquery with correlate leftJoin and aggregate select``() =
     sql.Contains("\"u\".\"customerid\"") =! true
 
 [<Test>]
+let ``countDistinct .Value after 5 leftJoin``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin d1 in sales.salesorderdetail on (o.salesorderid = d1.Value.salesorderid)
+            leftJoin d2 in sales.salesorderdetail on (o.salesorderid = d2.Value.salesorderid)
+            leftJoin d3 in sales.salesorderdetail on (o.salesorderid = d3.Value.salesorderid)
+            leftJoin d4 in sales.salesorderdetail on (o.salesorderid = d4.Value.salesorderid)
+            leftJoin d5 in sales.salesorderdetail on (o.salesorderid = d5.Value.salesorderid)
+            groupBy o.salesorderid
+            select {| id = o.salesorderid
+                      cnt1 = countDistinct d1.Value.salesorderdetailid
+                      cnt3 = countDistinct d3.Value.salesorderdetailid
+                      cnt5 = countDistinct d5.Value.salesorderdetailid |}
+        }
+        |> toSql
+    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("\"d1\".\"salesorderdetailid\"") =! true
+    sql.Contains("\"d5\".\"salesorderdetailid\"") =! true
+
+[<Test>]
 let ``castAs wrapping lateralCol``() =
     let lateralQuery =
         subquery {
