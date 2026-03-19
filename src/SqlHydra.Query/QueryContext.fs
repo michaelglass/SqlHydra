@@ -157,10 +157,11 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     /// Builds an ADO.NET DbCommand from a SqlKata query.
     member this.BuildCommand(query: Query) =
         let compiledQuery = compiler.Compile(query)
-        // Apply PostgreSQL DISTINCT ON and NULLS FIRST/LAST if present
+        // Apply PostgreSQL-specific DISTINCT ON
         if provider = Npgsql then
             compiledQuery.Sql <- DistinctOnStore.applyToSql query compiledQuery.Sql
-            compiledQuery.Sql <- NullsStore.applyToSql query compiledQuery.Sql
+        // Apply NULLS FIRST/LAST (cross-database)
+        compiledQuery.Sql <- NullsStore.applyToSql query compiledQuery.Sql
         this.BuildCommand(compiledQuery)
 
     /// Returns an ADO.NET data reader for a given query.

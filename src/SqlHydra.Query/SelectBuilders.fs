@@ -286,6 +286,20 @@ type SelectBuilder<'Selected, 'Mapped> () =
     member this.OrderByAliasDesc (state: QuerySource<'T, Query>, alias: string) =
         QuerySource<'T, Query>(state.Query.OrderByRaw($"\"{alias}\" DESC"), state.TableMappings)
 
+    /// Adds NULLS LAST to the most recent ORDER BY clause.
+    /// Supported by PostgreSQL, SQLite, Oracle, and MySQL 8+.
+    [<CustomOperation("nullsLast", MaintainsVariableSpace = true)>]
+    member this.NullsLast (state: QuerySource<'T, Query>) =
+        NullsStore.set state.Query "NULLS LAST"
+        state
+
+    /// Adds NULLS FIRST to the most recent ORDER BY clause.
+    /// Supported by PostgreSQL, SQLite, Oracle, and MySQL 8+.
+    [<CustomOperation("nullsFirst", MaintainsVariableSpace = true)>]
+    member this.NullsFirst (state: QuerySource<'T, Query>) =
+        NullsStore.set state.Query "NULLS FIRST"
+        state
+
     /// Sets the SKIP value for query
     [<CustomOperation("skip", MaintainsVariableSpace = true)>]
     member this.Skip (state: QuerySource<'T, Query>, skip) = 
