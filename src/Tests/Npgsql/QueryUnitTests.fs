@@ -1856,6 +1856,44 @@ let ``lateralCol references lateral join alias column``() =
     sql.Contains("\"summary\".\"total\"") =! true
 
 [<Test>]
+let ``5 leftJoin + lateralJoin + aggregate select with lateralCol and caseWhen``() =
+    let lateralInner =
+        subquery {
+            for d in sales.salesorderdetail do
+            correlate o in sales.salesorderheader
+            leftJoin p in sales.specialofferproduct on (d.specialofferid = p.Value.specialofferid)
+            where (d.salesorderid = o.salesorderid)
+            groupBy d.salesorderid
+            select {| delivered = countDistinct d.salesorderdetailid
+                      opened = countDistinct p.Value.specialofferid |}
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin d1 in sales.salesorderdetail on (o.salesorderid = d1.Value.salesorderid)
+            leftJoin d2 in sales.salesorderdetail on (o.salesorderid = d2.Value.salesorderid)
+            leftJoin d3 in sales.salesorderdetail on (o.salesorderid = d3.Value.salesorderid)
+            leftJoin d4 in sales.salesorderdetail on (o.salesorderid = d4.Value.salesorderid)
+            leftJoin d5 in sales.salesorderdetail on (o.salesorderid = d5.Value.salesorderid)
+            lateralJoin lateralInner "user_briefs"
+            groupBy o.salesorderid
+            select {| id = o.salesorderid
+                      total = countDistinct d1.Value.salesorderdetailid
+                      avgRate = avgBy (caseWhen (lateralCol<int> "user_briefs" "delivered" > 0)
+                                  (castAs<float>(lateralCol<int> "user_briefs" "opened") / castAs<float>(lateralCol<int> "user_briefs" "delivered"))
+                                  0.0)
+                      active7d = countDistinct (caseWhen (d2.Value.modifieddate > rawExpr<System.DateTime> "NOW() - INTERVAL '7 days'") d2.Value.salesorderdetailid 0) |}
+        }
+        |> toSql
+    printfn "5-leftJoin lateral SQL: %s" sql
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    sql.Contains("COUNT(DISTINCT") =! true
+    sql.Contains("CAST(") =! true
+    sql.Contains("\"user_briefs\"") =! true
+    sql.Contains("INTERVAL") =! true
+
+[<Test>]
 let ``lateral subquery with correlate leftJoin and aggregate select``() =
     let lateralQuery =
         subquery {
