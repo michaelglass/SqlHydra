@@ -857,6 +857,28 @@ let ``OrderByDescending NULLS LAST``() =
     sql.Contains("NULLS LAST") =! true
 
 [<Test>]
+let ``orderByAlias orders by a raw alias``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select o
+            orderByAlias "open_rate"
+        }
+        |> toSql
+    sql.Contains("ORDER BY \"open_rate\"") =! true
+
+[<Test>]
+let ``orderByAliasDesc orders by a raw alias descending``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select o
+            orderByAliasDesc "open_rate"
+        }
+        |> toSql
+    sql.Contains("ORDER BY \"open_rate\" DESC") =! true
+
+[<Test>]
 let ``DISTINCT ON single column``() =
     let sql =
         select {
@@ -1764,6 +1786,26 @@ let ``caseWhenMulti with multiple branches``() =
     sql.Contains("'premium'") =! true
     sql.Contains("'standard'") =! true
     sql.Contains("'budget'") =! true
+
+[<Test>]
+let ``SqlFn.greatest with 2 args``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| bigger = SqlFn.greatest(o.customerid, o.salesorderid) |}
+        }
+        |> toSql
+    sql.Contains("greatest(") =! true
+
+[<Test>]
+let ``SqlFn.least with 3 args``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| smaller = SqlFn.least(o.customerid, o.salesorderid, o.billtoaddressid) |}
+        }
+        |> toSql
+    sql.Contains("least(") =! true
 
 [<Test>]
 let ``caseWhenMulti with single branch``() =

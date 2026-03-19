@@ -178,6 +178,14 @@ type SqlFn =
     static member concat(s1: string, s2: string) : string = sqlFn
     static member concat(s1: string, s2: string, s3: string) : string = sqlFn
 
+    // GREATEST / LEAST (standard SQL)
+    static member greatest(a: 'T, b: 'T) : 'T = sqlFn
+    static member greatest(a: 'T, b: 'T, c: 'T) : 'T = sqlFn
+    static member greatest(a: 'T, b: 'T, c: 'T, d: 'T) : 'T = sqlFn
+    static member least(a: 'T, b: 'T) : 'T = sqlFn
+    static member least(a: 'T, b: 'T, c: 'T) : 'T = sqlFn
+    static member least(a: 'T, b: 'T, c: 'T, d: 'T) : 'T = sqlFn
+
 [<AutoOpen>]
 module CaseWhenFunctions =
     /// CASE WHEN condition THEN thenValue ELSE elseValue END.
