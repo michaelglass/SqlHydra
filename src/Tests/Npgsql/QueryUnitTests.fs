@@ -1834,6 +1834,31 @@ let ``caseWhen with aggregate in then value``() =
     sql.Contains("AS \"ItemsOrZero\"") =! true
 
 [<Test>]
+let ``correlate with multiple leftJoins and aggregates in lateral subquery``() =
+    let lateralQuery =
+        subquery {
+            for d in sales.salesorderdetail do
+            correlate o in sales.salesorderheader
+            leftJoin p in sales.specialofferproduct on (d.specialofferid = p.Value.specialofferid)
+            where (d.salesorderid = o.salesorderid)
+            groupBy d.salesorderid
+            select {| detailCount = countDistinct d.salesorderdetailid
+                      offerCount = countDistinct p.Value.specialofferid |}
+        }
+
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin lateralQuery "summary"
+            select o
+        }
+        |> toSql
+    printfn "correlate multi-join lateral SQL: %s" sql
+    sql.Contains("LEFT JOIN LATERAL") =! true
+    sql.Contains("\"d\".\"salesorderid\" = \"o\".\"salesorderid\"") =! true
+    sql.Contains("COUNT(DISTINCT") =! true
+
+[<Test>]
 let ``correlate enables outer-scope references in lateral subquery``() =
     let lateralQuery =
         subquery {
