@@ -53,6 +53,12 @@ type SqlFn =
     static member trunc(n: 'T) : 'T when 'T : struct = sqlFn
     static member trunc(n: 'T, decimals: int) : 'T when 'T : struct = sqlFn
 
+    // pgvector distance functions (emit infix operators via visitSqlFn)
+    // Second argument is typically inlineValue with a vector parameter
+    static member cosine_distance(a: 'T, b: 'U) : float = sqlFn
+    static member l2_distance(a: 'T, b: 'U) : float = sqlFn
+    static member inner_product_distance(a: 'T, b: 'U) : float = sqlFn
+
     // Date/time functions
     static member now() : DateTime = sqlFn
     static member current_date() : DateTime = sqlFn

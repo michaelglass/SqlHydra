@@ -459,6 +459,29 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
         let thenValue = renderExpressionAsSql qualifyColumn parameters m.Arguments.[1]
         let elseValue = renderExpressionAsSql qualifyColumn parameters m.Arguments.[2]
         $"CASE WHEN {condition} THEN {thenValue} ELSE {elseValue} END"
+    | MethodCall m when m.Arguments.Count = 2 &&
+                       List.contains m.Method.Name [ "cosine_distance"; "l2_distance"; "inner_product_distance" ] ->
+        let infixOp =
+            match m.Method.Name with
+            | "cosine_distance" -> "<=>"
+            | "l2_distance" -> "<->"
+            | "inner_product_distance" -> "<#>"
+            | _ -> failwith "unreachable"
+        let renderArg (arg: Expression) =
+            match arg with
+            | Member mem ->
+                let alias = visitAlias mem.Expression
+                qualifyColumn alias mem.Member
+            | MethodCall mc when mc.Method.Name = "inlineValue" && mc.Arguments.Count = 1 ->
+                let value = compileAndEvaluateExpression mc.Arguments.[0]
+                parameters.Add(value)
+                "?"
+            | MethodCall _ as nested -> visitSqlFn qualifyColumn parameters nested
+            | Constant c -> sprintf "%O" c.Value
+            | _ -> notImplMsg $"Unsupported argument in pgvector distance function: {arg.NodeType}"
+        let left = renderArg m.Arguments.[0]
+        let right = renderArg m.Arguments.[1]
+        $"{left} {infixOp} {right}"
     | MethodCall m ->
         let fnName = m.Method.Name
         let args =
@@ -1376,6 +1399,35 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     else false, false
                 let alias = visitAlias m.Expression
                 [ SelectedColumn (alias, m.Member.Name, m.Type, isOptional, isNullable) ]
+        | NBinary(left, op, right) ->
+            // Handle arithmetic expressions in SELECT projections (e.g., `1.0 - cosine_distance(col, v)`)
+            let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
+            let parms = ResizeArray<obj>()
+            let rec render (nexp: NormalizedExpression) =
+                match nexp with
+                | NConstant(v, t) when t = typeof<bool> -> if v :?> bool then "TRUE" else "FALSE"
+                | NConstant(v, t) when t = typeof<string> -> $"'{v}'"
+                | NConstant(v, _) -> sprintf "%O" v
+                | NMemberAccess _ ->
+                    let alias = nVisitAlias nexp
+                    match nexp with
+                    | NMemberAccess(_, m) -> qualifyCol alias m.Member
+                    | _ -> notImplMsg "Expected NMemberAccess"
+                | NMethodCall(m, _) -> visitSqlFn qualifyCol parms (m :> Expression)
+                | NBinary(l, bop, r) ->
+                    let left = render l
+                    let right = render r
+                    let opStr =
+                        match bop with
+                        | ExpressionType.Add -> "+"
+                        | ExpressionType.Subtract -> "-"
+                        | ExpressionType.Multiply -> "*"
+                        | ExpressionType.Divide -> "/"
+                        | _ -> notImplMsg $"Unsupported arithmetic operator in SELECT: {bop}"
+                    $"{left} {opStr} {right}"
+                | _ -> notImplMsg $"Unsupported expression in SELECT arithmetic: {nexp}"
+            let sqlFragment = render (NBinary(left, op, right))
+            [ SelectedExpression (sqlFragment, None, parms.ToArray()) ]
         | _ ->
             notImpl()
 

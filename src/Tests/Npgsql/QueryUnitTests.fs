@@ -1631,3 +1631,30 @@ let ``inlineValue works inside SQL function in select``() =
     sql.Contains("AS \"Score\"") =! true
     sql.Contains("@p") =! true
 
+[<Test>]
+let ``cosine_distance emits <=> operator in select``() =
+    let vector = [| 0.1f; 0.2f; 0.3f |]
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| Distance = cosine_distance(o.freight, inlineValue vector) |}
+        }
+        |> toSql
+
+    sql.Contains("<=>") =! true
+    sql.Contains("AS \"Distance\"") =! true
+    sql.Contains("@p") =! true
+
+[<Test>]
+let ``pgvector similarity as 1 minus distance``() =
+    let vector = [| 0.1f; 0.2f; 0.3f |]
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| Similarity = 1.0 - cosine_distance(o.freight, inlineValue vector) |}
+        }
+        |> toSql
+
+    sql.Contains("<=>") =! true
+    sql.Contains("AS \"Similarity\"") =! true
+
