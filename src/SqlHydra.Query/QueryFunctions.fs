@@ -1,7 +1,9 @@
 ﻿namespace SqlHydra.Query
 
+open System
+
 [<AutoOpen>]
-module Table = 
+module Table =
 
     /// Maps the entity 'T to a table of the exact same name.
     let table<'T> =
@@ -121,6 +123,39 @@ module SqlFunctions =
     ///   let LEN (s: string) : int = sqlFn
     ///   let SUBSTRING (s: string, start: int, length: int) : string = sqlFn
     let sqlFn<'Return> : 'Return = Unchecked.defaultof<'Return>
+
+/// Standard SQL functions for use in select expressions.
+/// Use `open type SqlFn` to access functions without qualification.
+type SqlFn =
+    // Null handling
+    static member coalesce(a: Option<'T>, b: 'T) : 'T = sqlFn
+    static member coalesce(a: Nullable<'T>, b: 'T) : 'T when 'T : struct = sqlFn
+    static member coalesce(a: 'T, b: 'T) : 'T = sqlFn
+    static member coalesce(a: 'T, b: 'T, c: 'T) : 'T = sqlFn
+    static member nullif(a: 'T, b: 'T) : Option<'T> = sqlFn
+
+    // Numeric functions (standard SQL)
+    static member abs(n: 'T) : 'T when 'T : struct = sqlFn
+    static member round(n: 'T) : 'T when 'T : struct = sqlFn
+    static member round(n: 'T, decimals: int) : 'T when 'T : struct = sqlFn
+    static member ceil(n: 'T) : 'T when 'T : struct = sqlFn
+    static member ceiling(n: 'T) : 'T when 'T : struct = sqlFn
+    static member floor(n: 'T) : 'T when 'T : struct = sqlFn
+    static member sign(n: 'T) : int when 'T : struct = sqlFn
+    static member power(n: 'T, exponent: 'T) : 'T when 'T : struct = sqlFn
+    static member sqrt(n: 'T) : float when 'T : struct = sqlFn
+    static member mod'(n: 'T, divisor: 'T) : 'T when 'T : struct = sqlFn
+    static member trunc(n: 'T) : 'T when 'T : struct = sqlFn
+    static member trunc(n: 'T, decimals: int) : 'T when 'T : struct = sqlFn
+
+    // String functions (standard SQL names)
+    static member upper(s: string) : string = sqlFn
+    static member lower(s: string) : string = sqlFn
+    static member trim(s: string) : string = sqlFn
+    static member substring(s: string, start: int, length: int) : string = sqlFn
+    static member replace(s: string, from: string, ``to``: string) : string = sqlFn
+    static member concat(s1: string, s2: string) : string = sqlFn
+    static member concat(s1: string, s2: string, s3: string) : string = sqlFn
 
 [<AutoOpen>]
 module CaseWhenFunctions =

@@ -3,25 +3,19 @@
 open System
 open SqlKata
 
-/// Common PostgreSQL functions for use in select expressions.
-/// Use `open type SqlFn` to access functions without qualification.
-type SqlFn =
-    // String functions (PostgreSQL uses lowercase)
+/// PostgreSQL-specific SQL functions.
+/// Use `open type PgSqlFn` for PostgreSQL-only functions.
+/// Standard functions (coalesce, abs, round, etc.) are in SqlFn.
+type PgSqlFn =
+    // PostgreSQL-specific string functions
     static member char_length(s: string) : int = sqlFn
     static member character_length(s: string) : int = sqlFn
     static member length(s: string) : int = sqlFn
-    static member upper(s: string) : string = sqlFn
-    static member lower(s: string) : string = sqlFn
     static member ltrim(s: string) : string = sqlFn
     static member rtrim(s: string) : string = sqlFn
     static member btrim(s: string) : string = sqlFn
-    static member trim(s: string) : string = sqlFn
-    static member substring(s: string, start: int, length: int) : string = sqlFn
-    static member replace(s: string, from: string, ``to``: string) : string = sqlFn
     static member position(substring: string, s: string) : int = sqlFn
     static member strpos(s: string, substring: string) : int = sqlFn
-    static member concat(s1: string, s2: string) : string = sqlFn
-    static member concat(s1: string, s2: string, s3: string) : string = sqlFn
     static member concat_ws(separator: string, s1: string, s2: string) : string = sqlFn
     static member concat_ws(separator: string, s1: string, s2: string, s3: string) : string = sqlFn
     static member left(s: string, length: int) : string = sqlFn
@@ -32,34 +26,13 @@ type SqlFn =
     static member rpad(s: string, length: int, fill: string) : string = sqlFn
     static member initcap(s: string) : string = sqlFn
 
-    // Null handling - with overloads for Option and Nullable
-    static member coalesce(a: Option<'T>, b: 'T) : 'T = sqlFn
-    static member coalesce(a: Nullable<'T>, b: 'T) : 'T when 'T : struct = sqlFn
-    static member coalesce(a: 'T, b: 'T) : 'T = sqlFn
-    static member coalesce(a: 'T, b: 'T, c: 'T) : 'T = sqlFn
-    static member nullif(a: 'T, b: 'T) : Option<'T> = sqlFn
-
-    // Numeric functions
-    static member abs(n: 'T) : 'T when 'T : struct = sqlFn
-    static member round(n: 'T) : 'T when 'T : struct = sqlFn
-    static member round(n: 'T, decimals: int) : 'T when 'T : struct = sqlFn
-    static member ceil(n: 'T) : 'T when 'T : struct = sqlFn
-    static member ceiling(n: 'T) : 'T when 'T : struct = sqlFn
-    static member floor(n: 'T) : 'T when 'T : struct = sqlFn
-    static member sign(n: 'T) : int when 'T : struct = sqlFn
-    static member power(n: 'T, exponent: 'T) : 'T when 'T : struct = sqlFn
-    static member sqrt(n: 'T) : float when 'T : struct = sqlFn
-    static member mod'(n: 'T, divisor: 'T) : 'T when 'T : struct = sqlFn
-    static member trunc(n: 'T) : 'T when 'T : struct = sqlFn
-    static member trunc(n: 'T, decimals: int) : 'T when 'T : struct = sqlFn
-
     // pgvector distance functions (emit infix operators via visitSqlFn)
     // Second argument is typically inlineValue with a vector parameter
     static member cosine_distance(a: 'T, b: 'U) : float = sqlFn
     static member l2_distance(a: 'T, b: 'U) : float = sqlFn
     static member inner_product_distance(a: 'T, b: 'U) : float = sqlFn
 
-    // Date/time functions
+    // Date/time functions (PostgreSQL-specific)
     static member now() : DateTime = sqlFn
     static member current_date() : DateTime = sqlFn
     static member current_time() : TimeSpan = sqlFn

@@ -3,7 +3,8 @@
 open Swensen.Unquote
 open SqlHydra.Query
 open SqlHydra.Query.NpgsqlExtensions
-open type SqlFn
+open type SqlHydra.Query.SqlFn
+open type PgSqlFn
 open NUnit.Framework
 open System.Threading.Tasks
 open Npgsql.DB
