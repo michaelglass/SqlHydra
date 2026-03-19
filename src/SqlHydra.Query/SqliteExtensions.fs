@@ -92,6 +92,21 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
             QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
         | None -> failwith "doUpdate requires onConflict to be called first"
 
+    /// Conflict action: DO UPDATE SET with COALESCE for specified columns.
+    /// Generates: SET col = COALESCE(excluded."col", "table"."col") — preserves existing value when new is NULL.
+    [<CustomOperation("doUpdateCoalesce", MaintainsVariableSpace = true)>]
+    member this.DoUpdateCoalesce(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] updateFields,
+        [<ProjectionParameter>] coalesceFields) =
+        let spec = state.Query
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun tblAlias p -> p.Name)
+        let coalesceFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'CoalesceProperties> coalesceFields (fun tblAlias p -> p.Name)
+        match spec.ConflictTarget with
+        | Some target ->
+            let newSpec = { spec with InsertType = OnConflict (target, DoUpdateCoalesce (updateFields, coalesceFields)); ConflictTarget = None }
+            QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+        | None -> failwith "doUpdateCoalesce requires onConflict to be called first"
+
     /// Deletes and re-inserts a record if a primary key conflict occurs.
     [<CustomOperation("insertOrReplace", MaintainsVariableSpace = true)>]
     member this.InsertOrReplace(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>) =
