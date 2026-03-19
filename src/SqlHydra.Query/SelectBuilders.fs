@@ -269,8 +269,18 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     /// Sets the ORDER BY DESC for single column
     [<CustomOperation("thenByDescending", MaintainsVariableSpace = true)>]
-    member this.ThenByDescending (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) = 
+    member this.ThenByDescending (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
         this.OrderByDescending(state, propertySelector)
+
+    /// ORDER BY a column alias (raw string). Use for computed/aliased columns.
+    [<CustomOperation("orderByAlias", MaintainsVariableSpace = true)>]
+    member this.OrderByAlias (state: QuerySource<'T, Query>, alias: string) =
+        QuerySource<'T, Query>(state.Query.OrderByRaw($"\"{alias}\""), state.TableMappings)
+
+    /// ORDER BY a column alias DESC (raw string). Use for computed/aliased columns.
+    [<CustomOperation("orderByAliasDesc", MaintainsVariableSpace = true)>]
+    member this.OrderByAliasDesc (state: QuerySource<'T, Query>, alias: string) =
+        QuerySource<'T, Query>(state.Query.OrderByRaw($"\"{alias}\" DESC"), state.TableMappings)
 
     /// Sets the SKIP value for query
     [<CustomOperation("skip", MaintainsVariableSpace = true)>]
