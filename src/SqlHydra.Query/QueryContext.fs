@@ -157,11 +157,9 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
     /// Builds an ADO.NET DbCommand from a SqlKata query.
     member this.BuildCommand(query: Query) =
         let compiledQuery = compiler.Compile(query)
-        // Apply PostgreSQL DISTINCT ON if present
+        // Apply PostgreSQL DISTINCT ON and NULLS FIRST/LAST if present
         if provider = Npgsql then
             compiledQuery.Sql <- DistinctOnStore.applyToSql query compiledQuery.Sql
-        // Apply PostgreSQL NULLS FIRST/LAST if present
-        if provider = Npgsql then
             compiledQuery.Sql <- NullsStore.applyToSql query compiledQuery.Sql
         this.BuildCommand(compiledQuery)
 
@@ -267,6 +265,9 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         let cmd = this.BuildCommand(compiledQuery, log = false) // We will log manually below to capture query changes
 
         KataUtils.failIfIdentityOnConflict iq.Spec
+
+        if iq.Spec.ConflictTarget.IsSome then
+            failwith "onConflict/onConflictRaw was specified without a subsequent doNothing/doUpdate/doUpdateCoalesce action."
 
         // Handle InsertOrUpdateOnUnique separately (SQL Server TRY/CATCH pattern)
         match iq.Spec.InsertType with

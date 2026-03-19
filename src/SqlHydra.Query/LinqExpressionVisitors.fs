@@ -287,12 +287,14 @@ module SqlPatterns =
             compileAndEvaluateExpression exp |> Some
         | _ -> None
 
+    let aggTypeFromMethodName (name: string) =
+        if name = nameof countDistinct then "COUNTDISTINCT"
+        else name.Replace("By", "").Replace("As", "").ToUpper()
+
     let (|AggregateColumn|_|) (exp: Expression) =
         match exp with
         | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
-            let aggType =
-                if m.Method.Name = nameof countDistinct then "COUNTDISTINCT"
-                else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+            let aggType = aggTypeFromMethodName m.Method.Name
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
             | _ -> None
@@ -302,9 +304,7 @@ module SqlPatterns =
     let (|AggregateExpression|_|) (exp: Expression) =
         match exp with
         | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
-            let aggType =
-                if m.Method.Name = nameof countDistinct then "COUNTDISTINCT"
-                else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+            let aggType = aggTypeFromMethodName m.Method.Name
             match m.Arguments.[0] with
             | Property _ -> None // handled by AggregateColumn
             | arg -> Some (aggType, arg)
@@ -555,7 +555,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
                 let alias = visitAlias mem.Expression
                 qualifyColumn alias mem.Member
             | Member mem ->
-                let value = System.Linq.Expressions.Expression.Lambda(mem).Compile().DynamicInvoke()
+                let value = compileAndEvaluateExpression (mem :> Expression)
                 parameters.Add(if isNull value then box System.DBNull.Value else value)
                 "?"
             | MethodCall mc when mc.Method.Name = "inlineValue" && mc.Arguments.Count = 1 ->
@@ -578,7 +578,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
                     let alias = visitAlias mem.Expression
                     qualifyColumn alias mem.Member
                 | Member mem ->
-                    let value = System.Linq.Expressions.Expression.Lambda(mem).Compile().DynamicInvoke()
+                    let value = compileAndEvaluateExpression (mem :> Expression)
                     parameters.Add(if isNull value then box System.DBNull.Value else value)
                     "?"
                 | Constant c when c.Value = null ->
@@ -612,7 +612,7 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (param
         qualifyColumn alias mem.Member
     | Member mem ->
         // Static field (Guid.Empty, DateTime.MinValue, String.Empty, etc.) — evaluate and emit as parameter
-        let value = System.Linq.Expressions.Expression.Lambda(mem).Compile().DynamicInvoke()
+        let value = compileAndEvaluateExpression (mem :> Expression)
         parameters.Add(if isNull value then box System.DBNull.Value else value)
         "?"
     | Constant c when c.Value = null -> "NULL"
@@ -638,9 +638,7 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (param
         let value = compileAndEvaluateExpression m.Arguments.[0] :?> string
         $"INTERVAL '{value}'"
     | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
-        let aggType =
-            if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
-            else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+        let aggType = aggTypeFromMethodName m.Method.Name
         match m.Arguments.[0] with
         | Member mem ->
             let alias = visitAlias mem.Expression
@@ -702,7 +700,7 @@ and extractListItems (qualifyColumn: string -> MemberInfo -> string) (parameters
                     let valStr = match value with | :? string as s -> $"'{s}'" | v -> sprintf "%O" v
                     yield (condStr, valStr) ]
             | _ -> notImplMsg $"Cannot extract list items from: {exp.NodeType}"
-        with _ -> notImplMsg $"Cannot extract list items from: {exp.NodeType}"
+        with ex -> notImplMsg $"Cannot extract list items from: {exp.NodeType}. Inner: {ex.Message}"
 
 and extractTupleItem (qualifyColumn: string -> MemberInfo -> string) (parameters: ResizeArray<obj>) (exp: Expression) : string * string =
     match exp with
@@ -2254,9 +2252,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
             | Constant c -> sprintf "%O" c.Value
             | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
-                let aggType =
-                    if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
-                    else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+                let aggType = aggTypeFromMethodName m.Method.Name
                 match m.Arguments.[0] with
                 | Member mem ->
                     let alias = resolveAliasFromExpr mem.Expression
@@ -2312,7 +2308,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
                             let valStr = match value with | :? string as s -> $"'{s}'" | v -> sprintf "%O" v
                             yield (condStr, valStr) ]
                     | _ -> notImplMsg $"Cannot extract list items from: {exp.NodeType}"
-                with _ -> notImplMsg $"Cannot extract list items from: {exp.NodeType}"
+                with ex -> notImplMsg $"Cannot extract list items from: {exp.NodeType}. Inner: {ex.Message}"
 
         and extractTupleItemProv (exp: Expression) : string * string =
             match exp with

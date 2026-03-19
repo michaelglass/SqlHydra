@@ -268,6 +268,8 @@ module NullsStore =
             Some suffix
         | false, _ -> None
 
+    let private clauseTerminators = [" LIMIT "; " OFFSET "; " FETCH "; " FOR "]
+
     /// Applies NULLS FIRST/LAST to compiled SQL if present.
     let applyToSql (query: SqlKata.Query) (sql: string) =
         match tryTake query with
@@ -276,7 +278,7 @@ module NullsStore =
             if orderByIdx >= 0 then
                 let afterOrderBy = sql.Substring(orderByIdx)
                 let endIdx =
-                    [" LIMIT "; " OFFSET "; " FETCH "; " FOR "]
+                    clauseTerminators
                     |> List.choose (fun kw ->
                         let i = afterOrderBy.IndexOf(kw)
                         if i > 0 then Some (orderByIdx + i) else None)
@@ -349,19 +351,20 @@ module internal KataUtils =
         // Process setRaw values into UnsafeLiteral kvps and collect parameter bindings
         let rawKvps = ResizeArray<KeyValuePair<string, obj>>()
         let allRawBindings = ResizeArray<string * obj>()
-        let mutable rawParamCounter = 0
-        for (col, rawSql, parms) in spec.SetRawValues do
-            let mutable processedSql = rawSql
-            for p in parms do
-                let paramName = $"@__raw_{rawParamCounter}"
-                rawParamCounter <- rawParamCounter + 1
-                let idx = processedSql.IndexOf('?')
-                if idx >= 0 then
-                    processedSql <- processedSql.Substring(0, idx) + paramName + processedSql.Substring(idx + 1)
-                    allRawBindings.Add(paramName, if isNull p then box System.DBNull.Value else p)
-                else
-                    failwith $"setRaw: more parameters supplied than '?' placeholders in SQL: '{rawSql}'"
-            rawKvps.Add(KeyValuePair(col, UnsafeLiteral(processedSql) :> obj))
+        if not spec.SetRawValues.IsEmpty then
+            let mutable rawParamCounter = 0
+            for (col, rawSql, parms) in spec.SetRawValues do
+                let mutable processedSql = rawSql
+                for p in parms do
+                    let paramName = $"@__raw_{rawParamCounter}"
+                    rawParamCounter <- rawParamCounter + 1
+                    let idx = processedSql.IndexOf('?')
+                    if idx >= 0 then
+                        processedSql <- processedSql.Substring(0, idx) + paramName + processedSql.Substring(idx + 1)
+                        allRawBindings.Add(paramName, if isNull p then box System.DBNull.Value else p)
+                    else
+                        failwith $"setRaw: more parameters supplied than '?' placeholders in SQL: '{rawSql}'"
+                rawKvps.Add(KeyValuePair(col, UnsafeLiteral(processedSql) :> obj))
 
         let preparedKvps =
             [| for (k, v) in kvps -> KeyValuePair(k, v)
