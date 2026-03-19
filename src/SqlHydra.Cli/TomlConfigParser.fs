@@ -25,6 +25,7 @@ let read(toml: string) =
     let readersTableMaybe = model.TryGet<TomlTable> "readers"
     let filtersTableMaybe = model.TryGet<TomlTable> "filters"
     let queryIntegrationTableMaybe = model.TryGet<TomlTable> "sqlhydra_query_integration"
+    let customTypeMappingsTableMaybe = model.TryGet<TomlTable> "custom_type_mappings"
 
     {
         Config.ConnectionString = generalTable.Get "connection"
@@ -82,6 +83,13 @@ let read(toml: string) =
                 }
             | None ->
                 Filters.Empty
+        Config.CustomTypeMappings =
+            match customTypeMappingsTableMaybe with
+            | Some tbl ->
+                tbl
+                |> Seq.map (fun kvp -> kvp.Key, kvp.Value :?> string)
+                |> Map.ofSeq
+            | None -> Map.empty
     }
 
 /// Saves a Config to .toml file.

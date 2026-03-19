@@ -51,6 +51,7 @@ let newConfigWizard (args: Args) =
             Config.TableDeclarations = true
             Config.Readers = None
             Config.Filters = Filters.Empty // User must manually configure filter in .toml file
+            Config.CustomTypeMappings = Map.empty
         }
 
     AnsiConsole.MarkupLine($"[green]-[/] {args.TomlFile.Name} has been created!")

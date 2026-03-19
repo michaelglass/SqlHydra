@@ -116,10 +116,20 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
                     col.TableName = tbl.Name
                 )                
                 
-            let supportedColumns = 
-                tableColumns                
-                |> Seq.choose (fun col -> 
-                    OracleDataTypes.tryFindTypeMapping (col.ProviderTypeName, col.Precision, col.Scale)
+            let supportedColumns =
+                tableColumns
+                |> Seq.choose (fun col ->
+                    let typeMapping =
+                        match cfg.CustomTypeMappings.TryFind (col.ProviderTypeName.ToLower().Trim()) with
+                        | Some clrType ->
+                            Some {
+                                TypeMapping.ColumnTypeAlias = col.ProviderTypeName
+                                TypeMapping.ClrType = clrType
+                                TypeMapping.DbType = System.Data.DbType.Object
+                                TypeMapping.ProviderDbType = None
+                            }
+                        | None -> OracleDataTypes.tryFindTypeMapping (col.ProviderTypeName, col.Precision, col.Scale)
+                    typeMapping
                     |> Option.map (fun typeMapping ->
                         { 
                             Column.Name = col.ColumnName

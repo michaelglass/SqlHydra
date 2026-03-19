@@ -25,6 +25,7 @@ let ``Save: All``() =
             TableDeclarations = true
             Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
             Filters = Filters.Empty
+            CustomTypeMappings = Map.empty
         }
 
     let toml = TomlConfigParser.save(cfg)
@@ -73,6 +74,7 @@ let ``Read: with no filters``() =
             TableDeclarations = false
             Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
             Filters = Filters.Empty
+            CustomTypeMappings = Map.empty
         }
 
     let cfg = TomlConfigParser.read(toml)
@@ -102,6 +104,7 @@ let ``Read: when no readers section should be None``() =
             TableDeclarations = false
             Readers = None
             Filters = Filters.Empty
+            CustomTypeMappings = Map.empty
         }
 
     let cfg = TomlConfigParser.read(toml)
@@ -132,6 +135,39 @@ let ``Read: should parse filters``() =
     let cfg = TomlConfigParser.read(toml)
 
     cfg.Filters =! expectedFilters
+
+[<Test>]
+let ``Read: should parse custom_type_mappings``() =
+    let toml =
+        """
+        [general]
+        connection = "Data Source=localhost\\SQLEXPRESS;Initial Catalog=AdventureWorksLT2019;Integrated Security=SSPI"
+        output = "AdventureWorks.fs"
+        namespace = "SampleApp.AdventureWorks"
+        cli_mutable = true
+        [custom_type_mappings]
+        vector = "Pgvector.Vector"
+        geography = "NetTopologySuite.Geometries.Geometry"
+        """
+
+    let cfg = TomlConfigParser.read(toml)
+
+    cfg.CustomTypeMappings =! Map [ "vector", "Pgvector.Vector"; "geography", "NetTopologySuite.Geometries.Geometry" ]
+
+[<Test>]
+let ``Read: missing custom_type_mappings defaults to empty``() =
+    let toml =
+        """
+        [general]
+        connection = "Data Source=localhost\\SQLEXPRESS;Initial Catalog=AdventureWorksLT2019;Integrated Security=SSPI"
+        output = "AdventureWorks.fs"
+        namespace = "SampleApp.AdventureWorks"
+        cli_mutable = true
+        """
+
+    let cfg = TomlConfigParser.read(toml)
+
+    cfg.CustomTypeMappings =! Map.empty
 
 [<Test>]
 let ``Read: should parse schema restrictions``() = 

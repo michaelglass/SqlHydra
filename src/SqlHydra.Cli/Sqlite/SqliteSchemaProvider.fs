@@ -59,10 +59,20 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
                     col.TableName = tbl.Name
                 )
 
-            let supportedColumns = 
-                let tryFindTypeMapping = SqliteDataTypes.tryFindTypeMapping isLegacy
+            let supportedColumns =
+                let builtInTryFindTypeMapping = SqliteDataTypes.tryFindTypeMapping isLegacy
+                let tryFindTypeMapping (typeName: string) =
+                    match cfg.CustomTypeMappings.TryFind (typeName.ToLower().Trim()) with
+                    | Some clrType ->
+                        Some {
+                            TypeMapping.ColumnTypeAlias = typeName
+                            TypeMapping.ClrType = clrType
+                            TypeMapping.DbType = System.Data.DbType.Object
+                            TypeMapping.ProviderDbType = None
+                        }
+                    | None -> builtInTryFindTypeMapping typeName
                 tableColumns
-                |> Seq.choose (fun col -> 
+                |> Seq.choose (fun col ->
                     tryFindTypeMapping col.ProviderTypeName
                     |> Option.map (fun typeMapping -> 
                         { 

@@ -114,6 +114,9 @@ type Config =
         
         /// Filters: optional filters for schemas, tables and columns
         Filters: Filters
+
+        /// Custom type mappings: database column type → F# CLR type
+        CustomTypeMappings: Map<string, string>
     }
 
 and [<RequireQualifiedAccess>] 

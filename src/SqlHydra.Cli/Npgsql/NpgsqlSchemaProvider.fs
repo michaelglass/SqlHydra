@@ -177,7 +177,17 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
         |> Seq.groupBy (fun col -> col.TableSchema, col.TableName)
         |> Map.ofSeq
 
-    let tryFindTypeMapping = NpgsqlDataTypes.tryFindTypeMapping isLegacy
+    let builtInTryFindTypeMapping = NpgsqlDataTypes.tryFindTypeMapping isLegacy
+    let tryFindTypeMapping (typeName: string) =
+        match cfg.CustomTypeMappings.TryFind (typeName.ToLower().Trim()) with
+        | Some clrType ->
+            Some {
+                TypeMapping.ColumnTypeAlias = typeName
+                TypeMapping.ClrType = clrType
+                TypeMapping.DbType = System.Data.DbType.Object
+                TypeMapping.ProviderDbType = None
+            }
+        | None -> builtInTryFindTypeMapping typeName
 
     let matViews = 
         materializedViews
