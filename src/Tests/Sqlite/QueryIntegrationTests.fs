@@ -356,7 +356,8 @@ let ``OnConflictDoUpdate``() = task {
         insertTask shared {
             for a in main.Address do
             entity address
-            onConflictDoUpdate a.AddressID (
+            onConflict a.AddressID
+            doUpdate (
                 a.AddressLine1,
                 a.AddressLine2,
                 a.City,

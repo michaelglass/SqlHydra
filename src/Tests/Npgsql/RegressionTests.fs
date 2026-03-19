@@ -476,7 +476,9 @@ let ``Regression: onConflictDoNothingWhereRaw with returning``() = task {
         insertTask shared {
             for e in ``public``.test_events do
             entity event1
-            onConflictDoNothingWhereRaw e.email_event_id "email_event_id IS NOT NULL"
+            onConflict e.email_event_id
+            whereRawConflict "email_event_id IS NOT NULL"
+            doNothing
             returning e.id
         }
 
@@ -488,7 +490,9 @@ let ``Regression: onConflictDoNothingWhereRaw with returning``() = task {
         insertTask shared {
             for e in ``public``.test_events do
             entity event2
-            onConflictDoNothingWhereRaw e.email_event_id "email_event_id IS NOT NULL"
+            onConflict e.email_event_id
+            whereRawConflict "email_event_id IS NOT NULL"
+            doNothing
             returning e.id
         }
 

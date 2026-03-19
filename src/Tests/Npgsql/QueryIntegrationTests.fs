@@ -595,7 +595,8 @@ let ``OnConflictDoUpdate``() = task {
         insertTask shared {
             for c in sales.currency do
             entity currency
-            onConflictDoUpdate c.currencycode (c.name, c.modifieddate)
+            onConflict c.currencycode
+            doUpdate (c.name, c.modifieddate)
         } :> Task
 
     let queryCurrency code = task {
@@ -634,7 +635,8 @@ let ``OnConflictDoNothing``() = task {
         insertTask shared {
             for c in sales.currency do
             entity currency
-            onConflictDoNothing c.currencycode
+            onConflict c.currencycode
+            doNothing
         } : Task
         
             
@@ -885,7 +887,9 @@ let ``Insert onConflictDoNothingWhereRaw``() = task {
         insertTask shared {
             for c in sales.currency do
             entity currency
-            onConflictDoNothingWhereRaw c.currencycode "TRUE"
+            onConflict c.currencycode
+            whereRawConflict "TRUE"
+            doNothing
         }
     // Conflict handled gracefully — 0 rows affected
     Assert.GreaterOrEqual(result2, 0)
@@ -941,7 +945,8 @@ let ``Insert with Returning after onConflictDoNothing``() = task {
         insertTask shared {
             for c in sales.currency do
             entity currency
-            onConflictDoNothing c.currencycode
+            onConflict c.currencycode
+            doNothing
             returning c.currencycode
         }
     // On conflict with DO NOTHING, no row is returned — expect default value (null for string)
@@ -977,7 +982,8 @@ let ``Insert onConflictDoUpdateCoalesce preserves existing value``() = task {
                     sales.currency.name = "Updated Name"
                     sales.currency.modifieddate = System.DateTime.Today
                 }
-            onConflictDoUpdateCoalesce c.currencycode (c.name, c.modifieddate) c.name
+            onConflict c.currencycode
+            doUpdateCoalesce (c.name, c.modifieddate) c.name
         } :> Task
 
     // Verify name was updated (EXCLUDED value was non-NULL, so COALESCE picks it)

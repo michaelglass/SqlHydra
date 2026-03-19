@@ -390,10 +390,8 @@ module internal KataUtils =
     /// Fails if `getId` identity field is used as an `onConflict` target.
     let failIfIdentityOnConflict spec =
         match spec.IdentityField, spec.InsertType with
-        | Some ident, OnConflictDoUpdate (conflictFields, _)
-        | Some ident, OnConflictDoUpdateCoalesce (conflictFields, _, _)
-        | Some ident, OnConflictDoNothing conflictFields
-        | Some ident, OnConflictDoNothingWhereRaw (conflictFields, _)
+        | Some ident, OnConflict (TypedColumns conflictFields, _)
+        | Some ident, OnConflict (TypedColumnsWhereRaw (conflictFields, _), _)
         | Some ident, InsertOrUpdateOnUnique (conflictFields, _) ->
             if conflictFields |> List.contains ident
             then failwith $"Using identity column as a conflict target is not supported."

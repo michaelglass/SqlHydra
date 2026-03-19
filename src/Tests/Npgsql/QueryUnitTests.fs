@@ -540,14 +540,16 @@ let ``Insert OnConflictDoNothing with WhereRaw``() =
                     sales.customer.rowguid = System.Guid.NewGuid()
                     sales.customer.customerid = 0
                 }
-            onConflictDoNothingWhereRaw c.personid "personid IS NOT NULL"
+            onConflict c.personid
+            whereRawConflict "personid IS NOT NULL"
+            doNothing
         }
 
     match query.Spec.InsertType with
-    | OnConflictDoNothingWhereRaw (fields, whereClause) ->
+    | OnConflict (TypedColumnsWhereRaw (fields, whereClause), DoNothing) ->
         Assert.AreEqual(["personid"], fields)
         Assert.AreEqual("personid IS NOT NULL", whereClause)
-    | _ -> Assert.Fail("Expected OnConflictDoNothingWhereRaw")
+    | _ -> Assert.Fail("Expected OnConflict (TypedColumnsWhereRaw, DoNothing)")
 
 [<Test>]
 let ``Insert onConflictDoNothingRawTarget with expression index``() =
@@ -560,13 +562,70 @@ let ``Insert onConflictDoNothingRawTarget with expression index``() =
                     sales.currency.name = "Test"
                     sales.currency.modifieddate = System.DateTime.Now
                 }
-            onConflictDoNothingRawTarget "currencycode, COALESCE(name, '')"
+            onConflictRaw "currencycode, COALESCE(name, '')"
+            doNothing
         }
 
     match query.Spec.InsertType with
-    | OnConflictDoNothingRawTarget target ->
+    | OnConflict (RawTarget target, DoNothing) ->
         Assert.AreEqual("currencycode, COALESCE(name, '')", target)
-    | other -> Assert.Fail($"Expected OnConflictDoNothingRawTarget, got {other}")
+    | other -> Assert.Fail($"Expected OnConflict (RawTarget, DoNothing), got {other}")
+
+[<Test>]
+let ``onConflict + doNothing``() =
+    let q =
+        insert {
+            for c in sales.currency do
+            entity { currencycode = "ZZZ"; name = "Test"; modifieddate = System.DateTime.Now }
+            onConflict c.currencycode
+            doNothing
+        }
+    q.Spec.InsertType =! OnConflict (TypedColumns ["currencycode"], DoNothing)
+
+[<Test>]
+let ``onConflict + doUpdate``() =
+    let q =
+        insert {
+            for c in sales.currency do
+            entity { currencycode = "ZZZ"; name = "Test"; modifieddate = System.DateTime.Now }
+            onConflict c.currencycode
+            doUpdate (c.name, c.modifieddate)
+        }
+    q.Spec.InsertType =! OnConflict (TypedColumns ["currencycode"], DoUpdate ["name"; "modifieddate"])
+
+[<Test>]
+let ``onConflict + doUpdateCoalesce``() =
+    let q =
+        insert {
+            for c in sales.currency do
+            entity { currencycode = "ZZZ"; name = "Test"; modifieddate = System.DateTime.Now }
+            onConflict c.currencycode
+            doUpdateCoalesce (c.name, c.modifieddate) c.name
+        }
+    q.Spec.InsertType =! OnConflict (TypedColumns ["currencycode"], DoUpdateCoalesce (["name"; "modifieddate"], ["name"]))
+
+[<Test>]
+let ``onConflictRaw + doNothing``() =
+    let q =
+        insert {
+            for c in sales.currency do
+            entity { currencycode = "ZZZ"; name = "Test"; modifieddate = System.DateTime.Now }
+            onConflictRaw "currencycode, COALESCE(name, '')"
+            doNothing
+        }
+    q.Spec.InsertType =! OnConflict (RawTarget "currencycode, COALESCE(name, '')", DoNothing)
+
+[<Test>]
+let ``onConflict + whereRawConflict + doNothing``() =
+    let q =
+        insert {
+            for c in sales.currency do
+            entity { currencycode = "ZZZ"; name = "Test"; modifieddate = System.DateTime.Now }
+            onConflict c.currencycode
+            whereRawConflict "TRUE"
+            doNothing
+        }
+    q.Spec.InsertType =! OnConflict (TypedColumnsWhereRaw (["currencycode"], "TRUE"), DoNothing)
 
 [<Test>]
 let ``Where with Coalesce``() =
@@ -916,15 +975,16 @@ let ``Insert onConflictDoUpdateCoalesce stores correct spec``() =
                     sales.currency.name = "Test"
                     sales.currency.modifieddate = System.DateTime.Today
                 }
-            onConflictDoUpdateCoalesce c.currencycode (c.name, c.modifieddate) c.name
+            onConflict c.currencycode
+            doUpdateCoalesce (c.name, c.modifieddate) c.name
         }
 
     match query.Spec.InsertType with
-    | OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) ->
+    | OnConflict (TypedColumns conflictFields, DoUpdateCoalesce (updateFields, coalesceFields)) ->
         Assert.AreEqual(["currencycode"], conflictFields)
         Assert.AreEqual(["name"; "modifieddate"], updateFields)
         Assert.AreEqual(["name"], coalesceFields)
-    | _ -> Assert.Fail("Expected OnConflictDoUpdateCoalesce")
+    | _ -> Assert.Fail("Expected OnConflict (TypedColumns, DoUpdateCoalesce)")
 
 [<Test>]
 let ``onConflictDoUpdateCoalesce generates COALESCE SQL``() =
@@ -937,14 +997,15 @@ let ``onConflictDoUpdateCoalesce generates COALESCE SQL``() =
                     sales.currency.name = "Test"
                     sales.currency.modifieddate = System.DateTime.Today
                 }
-            onConflictDoUpdateCoalesce c.currencycode (c.name, c.modifieddate) c.name
+            onConflict c.currencycode
+            doUpdateCoalesce (c.name, c.modifieddate) c.name
         }
 
     let compiler = SqlKata.Compilers.PostgresCompiler()
     let compiled = compiler.Compile(query.ToKataQuery())
     let sql =
         match query.Spec.InsertType with
-        | OnConflictDoUpdateCoalesce (cf, uf, coal) -> OnConflict.onConflictDoUpdateCoalesce "sales.currency" cf uf coal compiled.Sql
+        | OnConflict (target, action) -> OnConflict.applyConflict "sales.currency" target action compiled.Sql
         | _ -> compiled.Sql
 
     sql.Contains("COALESCE") =! true
