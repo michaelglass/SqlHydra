@@ -879,6 +879,44 @@ let ``orderByAliasDesc orders by a raw alias descending``() =
     sql.Contains("ORDER BY \"open_rate\" DESC") =! true
 
 [<Test>]
+let ``castAs float in select``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| total = castAs<float> o.salesorderid |}
+        }
+        |> toSql
+    sql.Contains("CAST") =! true
+    sql.Contains("AS FLOAT") =! true
+
+[<Test>]
+let ``castAs on aggregate in select``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            groupBy o.customerid
+            select {| rate = castAs<float> (countDistinct o.salesorderid) / castAs<float> (countBy o.salesorderid) |}
+        }
+        |> toSql
+    sql.Contains("CAST(COUNT(DISTINCT") =! true
+    sql.Contains("AS FLOAT)") =! true
+    sql.Contains("/") =! true
+
+[<Test>]
+let ``aggregate arithmetic in select``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            select {| id = o.salesorderid; total = countBy o.salesorderid + countDistinct d.salesorderdetailid |}
+        }
+        |> toSql
+    printfn "agg arith SQL: %s" sql
+    sql.Contains("COUNT") =! true
+    sql.Contains("+") =! true
+
+[<Test>]
 let ``DISTINCT ON single column``() =
     let sql =
         select {

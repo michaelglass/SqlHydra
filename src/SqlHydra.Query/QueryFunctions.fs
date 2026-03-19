@@ -187,6 +187,13 @@ type SqlFn =
     static member least(a: 'T, b: 'T, c: 'T, d: 'T) : 'T = sqlFn
 
 [<AutoOpen>]
+module CastFunctions =
+    /// CAST(expression AS targetType).
+    /// The target SQL type is inferred from the F# return type:
+    /// float/double → FLOAT, int → INTEGER, int64 → BIGINT, decimal → NUMERIC, string → TEXT, bool → BOOLEAN.
+    let castAs<'Result> (value: 'T) : 'Result = Unchecked.defaultof<'Result>
+
+[<AutoOpen>]
 module CaseWhenFunctions =
     /// CASE WHEN condition THEN thenValue ELSE elseValue END.
     /// Note: values are rendered as SQL literals, not parameters.

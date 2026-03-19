@@ -463,8 +463,27 @@ let visitAlias (exp: Expression) =
 
 /// Converts a SQL function MethodCall expression to a SQL fragment string.
 /// Example: LEN(p.FirstName) -> "LEN({p}.{FirstName})"
+/// Maps an F# type to its SQL CAST target type name.
+let private sqlTypeForClrType (t: System.Type) =
+    let t = if t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<option<_>> then t.GetGenericArguments().[0]
+            elif t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<System.Nullable<_>> then System.Nullable.GetUnderlyingType(t)
+            else t
+    if t = typeof<float> || t = typeof<double> then "FLOAT"
+    elif t = typeof<float32> || t = typeof<single> then "REAL"
+    elif t = typeof<int> || t = typeof<int32> then "INTEGER"
+    elif t = typeof<int64> then "BIGINT"
+    elif t = typeof<int16> then "SMALLINT"
+    elif t = typeof<decimal> then "NUMERIC"
+    elif t = typeof<string> then "TEXT"
+    elif t = typeof<bool> then "BOOLEAN"
+    else $"{t.Name}"
+
 let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: ResizeArray<obj>) (exp: Expression) : string =
     match exp with
+    | MethodCall m when m.Method.Name = "castAs" && m.Arguments.Count = 1 ->
+        let inner = renderExpressionAsSql qualifyColumn parameters m.Arguments.[0]
+        let sqlType = sqlTypeForClrType m.Method.ReturnType
+        $"CAST({inner} AS {sqlType})"
     | MethodCall m when m.Method.Name = "caseWhenMulti" ->
         // m.Arguments.[0] is the F# list of (bool * 'T) tuples
         // m.Arguments.[1] is the else value
@@ -542,6 +561,10 @@ and renderExpressionAsSql (qualifyColumn: string -> MemberInfo -> string) (param
         let value = compileAndEvaluateExpression m.Arguments.[0]
         parameters.Add(value)
         "?"
+    | MethodCall m when m.Method.Name = "castAs" && m.Arguments.Count = 1 ->
+        let inner = renderExpressionAsSql qualifyColumn parameters m.Arguments.[0]
+        let sqlType = sqlTypeForClrType m.Method.ReturnType
+        $"CAST({inner} AS {sqlType})"
     | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
         let aggType =
             if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
