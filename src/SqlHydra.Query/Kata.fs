@@ -249,6 +249,25 @@ module DistinctOnStore =
             else sql
         | None -> sql
 
+/// Module to store NULLS FIRST/LAST suffix for PostgreSQL ORDER BY clauses.
+module NullsStore =
+    open System.Runtime.CompilerServices
+
+    let private store = ConditionalWeakTable<SqlKata.Query, string>()
+
+    /// Associates a NULLS suffix with a query
+    let set (query: SqlKata.Query) (suffix: string) =
+        store.Remove(query) |> ignore
+        store.Add(query, suffix)
+
+    /// Gets and removes the NULLS suffix for a query
+    let tryTake (query: SqlKata.Query) =
+        match store.TryGetValue(query) with
+        | true, suffix ->
+            store.Remove(query) |> ignore
+            Some suffix
+        | false, _ -> None
+
 module internal KataUtils =
 
     // Manually convert DateOnly to DateTime and TimeOnly to TimeSpan (until Microsoft.Data.SqlClient handles)

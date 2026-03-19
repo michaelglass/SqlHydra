@@ -808,7 +808,8 @@ let ``OrderBy NULLS LAST``() =
     let sql =
         select {
             for o in sales.salesorderheader do
-            orderByNullsLast o.creditcardid
+            orderBy o.creditcardid
+            nullsLast
             select o
         }
         |> toSql
@@ -820,12 +821,39 @@ let ``OrderByDescending NULLS FIRST``() =
     let sql =
         select {
             for o in sales.salesorderheader do
-            orderByDescNullsFirst o.creditcardid
+            orderByDescending o.creditcardid
+            nullsFirst
             select o
         }
         |> toSql
 
     sql.Contains("NULLS FIRST") =! true
+
+[<Test>]
+let ``OrderBy NULLS FIRST``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            orderBy o.creditcardid
+            nullsFirst
+            select o
+        }
+        |> toSql
+
+    sql.Contains("NULLS FIRST") =! true
+
+[<Test>]
+let ``OrderByDescending NULLS LAST``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            orderByDescending o.creditcardid
+            nullsLast
+            select o
+        }
+        |> toSql
+
+    sql.Contains("NULLS LAST") =! true
 
 [<Test>]
 let ``DISTINCT ON single column``() =

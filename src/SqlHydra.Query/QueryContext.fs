@@ -160,6 +160,21 @@ type QueryContext(conn: DbConnection, compiler: SqlKata.Compilers.Compiler) =
         // Apply PostgreSQL DISTINCT ON if present
         if provider = Npgsql then
             compiledQuery.Sql <- DistinctOnStore.applyToSql query compiledQuery.Sql
+        // Apply PostgreSQL NULLS FIRST/LAST if present
+        match NullsStore.tryTake query with
+        | Some suffix when provider = Npgsql ->
+            let sql = compiledQuery.Sql
+            let orderByIdx = sql.LastIndexOf("ORDER BY")
+            if orderByIdx >= 0 then
+                let afterOrderBy = sql.Substring(orderByIdx)
+                let endIdx =
+                    [" LIMIT "; " OFFSET "; " FETCH "; " FOR "]
+                    |> List.choose (fun kw ->
+                        let i = afterOrderBy.IndexOf(kw)
+                        if i > 0 then Some (orderByIdx + i) else None)
+                    |> function [] -> sql.Length | xs -> List.min xs
+                compiledQuery.Sql <- sql.Insert(endIdx, $" {suffix}")
+        | _ -> ()
         this.BuildCommand(compiledQuery)
 
     /// Returns an ADO.NET data reader for a given query.
