@@ -241,6 +241,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
                     let aggFragment = LinqExpressionVisitors.SqlPatterns.renderAggregate aggType fqCol
                     state.Query.OrderByRaw(aggFragment)
+                | LinqExpressionVisitors.OrderByExpression (sqlFragment, parms) ->
+                    state.Query.OrderByRaw(sqlFragment, parms |> Array.map (fun p -> p :> obj))
                 | LinqExpressionVisitors.OrderByIgnored ->
                     state.Query
         QuerySource<'T, Query>(orderedQuery, state.TableMappings)
@@ -263,7 +265,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
                     let aggFragment = LinqExpressionVisitors.SqlPatterns.renderAggregate aggType fqCol
                     state.Query.OrderByRaw($"%s{aggFragment} DESC")
-                | LinqExpressionVisitors.OrderByIgnored -> 
+                | LinqExpressionVisitors.OrderByExpression (sqlFragment, parms) ->
+                    state.Query.OrderByRaw($"%s{sqlFragment} DESC", parms |> Array.map (fun p -> p :> obj))
+                | LinqExpressionVisitors.OrderByIgnored ->
                     state.Query
         QuerySource<'T, Query>(orderedQuery, state.TableMappings)
 

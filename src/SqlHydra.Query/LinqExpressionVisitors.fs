@@ -528,7 +528,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
             | _ -> notImplMsg $"Unsupported argument in pgvector distance function: {arg.NodeType}"
         let left = renderArg m.Arguments.[0]
         let right = renderArg m.Arguments.[1]
-        $"{left} {infixOp} {right}"
+        $"({left} {infixOp} {right})"
     | MethodCall m ->
         let fnName = m.Method.Name
         let args =
@@ -1143,7 +1143,6 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                 notImplMsg("Value to value comparisons are not currently supported. Ex: having (1 = 1)")
             | _ ->
                 notImpl()
-
         | _ ->
             notImplMsg $"Unsupported expression type in having clause: {nexp}"
 
@@ -1168,6 +1167,7 @@ let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'P
 type OrderBy =
     | OrderByColumn of tableAlias: string * MemberInfo
     | OrderByAggregateColumn of aggregateType: string * tableAlias: string * MemberInfo
+    | OrderByExpression of sqlFragment: string * parameters: obj array
     | OrderByIgnored
 
 /// Returns a column MemberInfo.
@@ -1197,6 +1197,12 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
         | NProperty (p, _) ->
             let alias = visitAlias p.Expression
             OrderByColumn (alias, p.Member)
+        | NMethodCall(m, _) ->
+            // Handle function calls in orderBy (e.g., cosine_distance, SqlFn calls)
+            let qualifyCol alias (mem: MemberInfo) = $"\"{alias}\".\"{mem.Name}\""
+            let parms = ResizeArray<obj>()
+            let sqlFragment = visitSqlFn qualifyCol parms (m :> Expression)
+            OrderByExpression (sqlFragment, parms.ToArray())
         | _ -> notImpl()
 
     visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))

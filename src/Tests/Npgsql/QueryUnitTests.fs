@@ -879,6 +879,48 @@ let ``orderByAliasDesc orders by a raw alias descending``() =
     sql.Contains("ORDER BY \"open_rate\" DESC") =! true
 
 [<Test>]
+let ``having after join with aggregate``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            having (countDistinct d.salesorderdetailid > 0)
+            select o.salesorderid
+        }
+        |> toSql
+    printfn "HAVING SQL: %s" sql
+    sql.Contains("HAVING") =! true
+    sql.Contains("COUNT(DISTINCT") =! true
+
+[<Test>]
+let ``orderBy with function call after multi-join``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            orderBy (SqlFn.coalesce(o.subtotal, 0m))
+            select o.salesorderid
+        }
+        |> toSql
+    printfn "ORDER BY FN SQL: %s" sql
+    sql.Contains("ORDER BY") =! true
+    sql.Contains("coalesce") =! true
+
+[<Test>]
+let ``infix operator wrapped in parentheses``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            select {| val1 = 1.0 - PgSqlFn.cosine_distance(o.subtotal, inlineValue 1.0m) |}
+        }
+        |> toSql
+    printfn "INFIX PARENS SQL: %s" sql
+    // Should have parentheses around the infix operator
+    sql.Contains("(") =! true
+    sql.Contains("<=>") =! true
+
+[<Test>]
 let ``castAs float in select``() =
     let sql =
         select {
