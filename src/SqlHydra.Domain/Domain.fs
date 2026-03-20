@@ -134,9 +134,23 @@ type Provider =
         GetSchema: Config * bool -> Schema
     }
 
-and ProviderType = 
+and ProviderType =
     | SqlServer
     | Npgsql
     | Sqlite
     | MySql
     | Oracle
+
+module CustomTypeMappingHelper =
+    /// Tries to find a custom type mapping from user-configured mappings.
+    let tryFind (customMappings: Map<string, string>) (typeName: string) : TypeMapping option =
+        if customMappings.IsEmpty then None
+        else
+            customMappings.TryFind (typeName.ToLower().Trim())
+            |> Option.map (fun clrType ->
+                {
+                    TypeMapping.ColumnTypeAlias = typeName
+                    TypeMapping.ClrType = clrType
+                    TypeMapping.DbType = System.Data.DbType.Object
+                    TypeMapping.ProviderDbType = None
+                })

@@ -179,15 +179,8 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
 
     let builtInTryFindTypeMapping = NpgsqlDataTypes.tryFindTypeMapping isLegacy
     let tryFindTypeMapping (typeName: string) =
-        match cfg.CustomTypeMappings.TryFind (typeName.ToLower().Trim()) with
-        | Some clrType ->
-            Some {
-                TypeMapping.ColumnTypeAlias = typeName
-                TypeMapping.ClrType = clrType
-                TypeMapping.DbType = System.Data.DbType.Object
-                TypeMapping.ProviderDbType = None
-            }
-        | None -> builtInTryFindTypeMapping typeName
+        CustomTypeMappingHelper.tryFind cfg.CustomTypeMappings typeName
+        |> Option.orElseWith (fun () -> builtInTryFindTypeMapping typeName)
 
     let matViews = 
         materializedViews

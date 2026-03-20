@@ -87,7 +87,10 @@ let read(toml: string) =
             match customTypeMappingsTableMaybe with
             | Some tbl ->
                 tbl
-                |> Seq.map (fun kvp -> kvp.Key, kvp.Value :?> string)
+                |> Seq.map (fun kvp ->
+                    match kvp.Value with
+                    | :? string as s -> kvp.Key, s
+                    | v -> failwithf "custom_type_mappings: value for key '%s' must be a string (got %s)" kvp.Key (v.GetType().Name))
                 |> Map.ofSeq
             | None -> Map.empty
     }
@@ -118,6 +121,11 @@ let save(cfg: Config) =
     filters.Items.Add("exclude", cfg.Filters.Excludes |> List.toArray)
 
     doc.Tables.Add(filters)
-    
+
+    if not cfg.CustomTypeMappings.IsEmpty then
+        let customMappings = TableSyntax("custom_type_mappings")
+        cfg.CustomTypeMappings |> Map.iter (fun k v -> customMappings.Items.Add(k, v))
+        doc.Tables.Add(customMappings)
+
     let toml = doc.ToString()
     toml
