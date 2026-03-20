@@ -132,6 +132,11 @@ module VisitorPatterns =
         | ExpressionType.Parameter -> Some (exp :?> ParameterExpression)
         | _ -> None
 
+    let (|UnwrapBlock|_|) (exp: Expression) =
+        match exp with
+        | :? System.Linq.Expressions.BlockExpression as block -> Some block.Result
+        | _ -> None
+
 /// Returns true if the type is a scalar (primitive, value type, string, decimal) or an Option/Nullable wrapping a scalar.
 let private isScalarType (t: System.Type) =
     let unwrapped =
@@ -462,41 +467,32 @@ let reverseComparison (expType: ExpressionType) =
 let getReverseComparison = getComparison << reverseComparison
     
 let visitAlias (exp: Expression) =
-    let breadcrumbs = ResizeArray<string>()
-    let rec visit (exp: Expression) =
+    let rec visit (exp: Expression) (trail: unit -> string) =
         match exp with
         | null ->
-            let trail = breadcrumbs |> String.concat " -> "
-            notImplMsg $"visitAlias: null expression. Trail: {trail}"
+            notImplMsg $"visitAlias: null expression. Trail: {trail()}"
         | Member m ->
-            let exprType = if m.Expression <> null then m.Expression.NodeType.ToString() else "NULL"
-            breadcrumbs.Add(sprintf "Member(%s, expr=%s)" m.Member.Name exprType)
-            visit m.Expression
+            let nextTrail () =
+                let exprType = if m.Expression <> null then m.Expression.NodeType.ToString() else "NULL"
+                sprintf "Member(%s, expr=%s) -> %s" m.Member.Name exprType (trail())
+            visit m.Expression nextTrail
         | Parameter p -> p.Name
         | MethodCall m when m.Method.Name.StartsWith("get_Item") ->
-            let objType = if m.Object <> null then m.Object.NodeType.ToString() else "NULL"
-            breadcrumbs.Add(sprintf "Call(%s, obj=%s)" m.Method.Name objType)
-            visit m.Object
+            let nextTrail () =
+                let objType = if m.Object <> null then m.Object.NodeType.ToString() else "NULL"
+                sprintf "Call(%s, obj=%s) -> %s" m.Method.Name objType (trail())
+            visit m.Object nextTrail
         | :? System.Linq.Expressions.BlockExpression as block ->
-            let varNames = block.Variables |> Seq.map (fun v -> sprintf "%s:%s" v.Name v.Type.Name) |> String.concat ", "
-            breadcrumbs.Add(sprintf "Block(vars=[%s], exprs=%d, result=%O)" varNames block.Expressions.Count block.Result.NodeType)
-            // .NET 10 F# compiler may hoist scalar values into block-level assignments.
-            for expr in block.Expressions do
-                match expr with
-                | :? System.Linq.Expressions.BinaryExpression as assign when assign.NodeType = ExpressionType.Assign ->
-                    match assign.Left with
-                    | :? System.Linq.Expressions.ParameterExpression as p ->
-                        breadcrumbs.Add(sprintf "  Assign(%s:%s = %O)" p.Name p.Type.Name assign.Right.NodeType)
-                    | _ -> ()
-                | _ -> ()
-            visit block.Result
+            let nextTrail () =
+                let varNames = block.Variables |> Seq.map (fun v -> sprintf "%s:%s" v.Name v.Type.Name) |> String.concat ", "
+                sprintf "Block(vars=[%s], exprs=%d, result=%O) -> %s" varNames block.Expressions.Count block.Result.NodeType (trail())
+            visit block.Result nextTrail
         | :? System.Linq.Expressions.UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
-            breadcrumbs.Add(sprintf "Convert(%O)" u.Operand.NodeType)
-            visit u.Operand
+            let nextTrail () = sprintf "Convert(%O) -> %s" u.Operand.NodeType (trail())
+            visit u.Operand nextTrail
         | _ ->
-            let trail = breadcrumbs |> String.concat " -> "
-            notImplMsg $"visitAlias: unexpected {exp.NodeType} ({exp.GetType().Name}). Trail: {trail}"
-    visit exp
+            notImplMsg $"visitAlias: unexpected {exp.NodeType} ({exp.GetType().Name}). Trail: {trail()}"
+    visit exp (fun () -> "root")
 
 /// Converts a SQL function MethodCall expression to a SQL fragment string.
 /// Example: LEN(p.FirstName) -> "LEN({p}.{FirstName})"
@@ -1061,6 +1057,7 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
             | _ ->
                 notImpl()
 
+
         | _ ->
             notImplMsg $"Unsupported expression type in where clause: {nexp}"
 
@@ -1199,6 +1196,7 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                 notImplMsg("Value to value comparisons are not currently supported. Ex: having (1 = 1)")
             | _ ->
                 notImpl()
+
         | _ ->
             notImplMsg $"Unsupported expression type in having clause: {nexp}"
 
@@ -1216,6 +1214,7 @@ let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'P
             let alias = nVisitAlias inner
             let column = qualifyColumn alias m.Member
             [column]
+
         | _ -> notImpl()
 
     visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
@@ -1259,6 +1258,7 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
             let parms = ResizeArray<obj>()
             let sqlFragment = visitSqlFn qualifyCol parms (m :> Expression)
             OrderByExpression (sqlFragment, parms.ToArray())
+
         | _ -> notImpl()
 
     visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))

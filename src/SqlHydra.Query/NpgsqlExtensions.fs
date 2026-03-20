@@ -44,15 +44,6 @@ type PgSqlFn =
 
 type InsertBuilder<'Inserted, 'InsertReturn> with
 
-    /// Sets the conflict target to typed column(s).
-    [<CustomOperation("onConflict", MaintainsVariableSpace = true)>]
-    member this.OnConflict(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
-        [<ProjectionParameter>] conflictFields) =
-        let spec = state.Query
-        let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun tblAlias p -> p.Name)
-        let newSpec = { spec with ConflictTarget = Some (TypedColumns conflictFields) }
-        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
-
     /// Sets the conflict target to a raw SQL expression (for expression indexes).
     [<CustomOperation("onConflictRaw", MaintainsVariableSpace = true)>]
     member this.OnConflictRaw(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
@@ -72,43 +63,6 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
             | _ -> failwith "whereRawConflict requires onConflict to be called first with typed columns"
         let newSpec = { spec with ConflictTarget = Some newTarget }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
-
-    /// Conflict action: DO NOTHING.
-    [<CustomOperation("doNothing", MaintainsVariableSpace = true)>]
-    member this.DoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>) =
-        let spec = state.Query
-        match spec.ConflictTarget with
-        | Some target ->
-            let newSpec = { spec with InsertType = OnConflict (target, DoNothing); ConflictTarget = None }
-            QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
-        | None -> failwith "doNothing requires onConflict or onConflictRaw to be called first"
-
-    /// Conflict action: DO UPDATE SET col=EXCLUDED.col for each update field.
-    [<CustomOperation("doUpdate", MaintainsVariableSpace = true)>]
-    member this.DoUpdate(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
-        [<ProjectionParameter>] updateFields) =
-        let spec = state.Query
-        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun tblAlias p -> p.Name)
-        match spec.ConflictTarget with
-        | Some target ->
-            let newSpec = { spec with InsertType = OnConflict (target, DoUpdate updateFields); ConflictTarget = None }
-            QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
-        | None -> failwith "doUpdate requires onConflict or onConflictRaw to be called first"
-
-    /// Conflict action: DO UPDATE SET with COALESCE for specified columns (PostgreSQL only).
-    /// Generates: SET col = COALESCE(EXCLUDED."col", "table"."col") — preserves existing value when new is NULL.
-    [<CustomOperation("doUpdateCoalesce", MaintainsVariableSpace = true)>]
-    member this.DoUpdateCoalesce(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
-        [<ProjectionParameter>] updateFields,
-        [<ProjectionParameter>] coalesceFields) =
-        let spec = state.Query
-        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun tblAlias p -> p.Name)
-        let coalesceFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'CoalesceProperties> coalesceFields (fun tblAlias p -> p.Name)
-        match spec.ConflictTarget with
-        | Some target ->
-            let newSpec = { spec with InsertType = OnConflict (target, DoUpdateCoalesce (updateFields, coalesceFields)); ConflictTarget = None }
-            QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
-        | None -> failwith "doUpdateCoalesce requires onConflict or onConflictRaw to be called first"
 
 /// PostgreSQL-specific extensions for the select builder.
 type SelectBuilder<'Selected, 'Mapped> with
