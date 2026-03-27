@@ -5,6 +5,8 @@
     <Description>pgvector distance functions for SqlHydra.Query — cosine, L2, and inner product distance operators.</Description>
     <Authors>Jordan Marr</Authors>
     <PackageTags>F# fsharp sql pgvector vector similarity</PackageTags>
+    <!-- .NET 10 F# compatibility (auto-patched by build script) -->
+    <NoWarn Condition="'$(TargetFramework)' == 'net10.0'">$(NoWarn);FS1178;FS0066;FS1182;FS0064;FS0052</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +22,6 @@
     <PackageReference Update="FSharp.Core" Version="6.0.7" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
     <PackageReference Update="FSharp.Core" Version="8.0.100" Condition="'$(TargetFramework)' == 'net8.0'" />
     <PackageReference Update="FSharp.Core" Version="9.0.201" Condition="'$(TargetFramework)' == 'net9.0'" />
-    <PackageReference Update="FSharp.Core" Version="10.0.100" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <PackageReference Update="FSharp.Core" Version="10.1.201" Condition="'$(TargetFramework)' == 'net10.0'" />
   </ItemGroup>
 </Project>
