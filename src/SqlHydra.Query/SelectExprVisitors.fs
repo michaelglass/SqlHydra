@@ -576,6 +576,19 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
         let qualifyCol alias (mem: MemberInfo) = $"[{alias}].[{mem.Name}]"
         let rec visitSqlFnWithProvenance (exp: Expression) : string =
             match exp with
+            | MethodCall m when m.Method.Name = "caseWhenMulti" ->
+                let branches = extractListItemsProv m.Arguments.[0]
+                let elseValue = renderExprAsSqlProv m.Arguments.[1]
+                let whenClauses =
+                    branches
+                    |> List.map (fun (cond, value) -> $"WHEN {cond} THEN {value}")
+                    |> String.concat " "
+                $"CASE {whenClauses} ELSE {elseValue} END"
+            | MethodCall m when m.Method.Name = "caseWhen" ->
+                let condition = renderExprAsSqlProv m.Arguments.[0]
+                let thenValue = renderExprAsSqlProv m.Arguments.[1]
+                let elseValue = renderExprAsSqlProv m.Arguments.[2]
+                $"CASE WHEN {condition} THEN {thenValue} ELSE {elseValue} END"
             | MethodCall m ->
                 let fnName = m.Method.Name
                 let args =
@@ -600,6 +613,88 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
                 $"{fnName}({args})"
             | _ ->
                 notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
+
+        and renderExprAsSqlProv (exp: Expression) : string =
+            match exp with
+            | Member mem ->
+                let alias = resolveAliasFromExpr mem.Expression
+                qualifyCol alias mem.Member
+            | Constant c when c.Value = null -> "NULL"
+            | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
+            | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
+            | Constant c -> sprintf "%O" c.Value
+            | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
+                let aggType =
+                    if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
+                    else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+                match m.Arguments.[0] with
+                | Member mem ->
+                    let alias = resolveAliasFromExpr mem.Expression
+                    let fqCol = qualifyCol alias mem.Member
+                    NormalizedPatterns.renderAggregate aggType fqCol
+                | _ -> notImplMsg $"Unsupported argument to aggregate in CASE WHEN"
+            | MethodCall _ as nested -> visitSqlFnWithProvenance nested
+            | Unary u when u.NodeType = ExpressionType.Convert -> renderExprAsSqlProv u.Operand
+            | Binary b ->
+                let left = renderExprAsSqlProv b.Left
+                let right = renderExprAsSqlProv b.Right
+                let op =
+                    match b.NodeType with
+                    | ExpressionType.Equal -> "="
+                    | ExpressionType.NotEqual -> "<>"
+                    | ExpressionType.GreaterThan -> ">"
+                    | ExpressionType.GreaterThanOrEqual -> ">="
+                    | ExpressionType.LessThan -> "<"
+                    | ExpressionType.LessThanOrEqual -> "<="
+                    | ExpressionType.Add -> "+"
+                    | ExpressionType.Subtract -> "-"
+                    | ExpressionType.Multiply -> "*"
+                    | ExpressionType.Divide -> "/"
+                    | ExpressionType.Modulo -> "%"
+                    | _ -> notImplMsg $"Unsupported CASE WHEN operator: {b.NodeType}"
+                $"{left} {op} {right}"
+            | _ -> notImplMsg $"Unsupported CASE WHEN expression: {exp.NodeType}"
+
+        and extractListItemsProv (exp: Expression) : (string * string) list =
+            match exp with
+            | :? MethodCallExpression as m when m.Method.Name = "Cons" || m.Method.Name = "op_ColonColon" ->
+                let tupleArg = m.Arguments.[0]
+                let restArg = m.Arguments.[1]
+                let (cond, value) = extractTupleItemProv tupleArg
+                (cond, value) :: extractListItemsProv restArg
+            | :? NewExpression as n when n.Arguments.Count = 2 ->
+                let tupleArg = n.Arguments.[0]
+                let restArg = n.Arguments.[1]
+                let (cond, value) = extractTupleItemProv tupleArg
+                (cond, value) :: extractListItemsProv restArg
+            | :? MemberExpression as m when m.Member.Name = "Empty" -> []
+            | :? DefaultExpression -> []
+            | _ ->
+                try
+                    let value = compileAndEvaluateExpression exp
+                    match value with
+                    | :? System.Collections.IEnumerable as items ->
+                        [ for item in items do
+                            let t = item.GetType()
+                            let cond = t.GetProperty("Item1").GetValue(item) :?> bool
+                            let value = t.GetProperty("Item2").GetValue(item)
+                            let condStr = if cond then "TRUE" else "FALSE"
+                            let valStr = match value with | :? string as s -> $"'{s}'" | v -> sprintf "%O" v
+                            yield (condStr, valStr) ]
+                    | _ -> notImplMsg $"Cannot extract list items from: {exp.NodeType}"
+                with ex -> notImplMsg $"Cannot extract list items from: {exp.NodeType}. Inner: {ex.Message}"
+
+        and extractTupleItemProv (exp: Expression) : string * string =
+            match exp with
+            | :? NewExpression as n when n.Arguments.Count = 2 ->
+                let cond = renderExprAsSqlProv n.Arguments.[0]
+                let value = renderExprAsSqlProv n.Arguments.[1]
+                (cond, value)
+            | :? MethodCallExpression as m when m.Method.Name = "NewTuple" ->
+                let cond = renderExprAsSqlProv m.Arguments.[0]
+                let value = renderExprAsSqlProv m.Arguments.[1]
+                (cond, value)
+            | _ -> notImplMsg $"Cannot extract tuple from: {exp.NodeType}"
 
         let sqlFragment = visitSqlFnWithProvenance (m :> Expression)
         let exprAlias = $"__hydra_expr_{!sqlExprCounter}"
