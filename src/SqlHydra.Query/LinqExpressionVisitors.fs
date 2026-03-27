@@ -1415,15 +1415,14 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     [| for i in 0 .. lam.Parameters.Count - 1 do
                         let paramType = lam.Parameters.[i].Type
                         let isScalar = isScalarType paramType
-                        let argSels = if isScalar then visit args.[i] else []
+                        let argSels = visit args.[i]  // Visit argument regardless of scalar type
                         yield (lam.Parameters.[i].Name, argSels, isScalar) |]
                 for (paramName, argSels, isScalar) in argResults do
-                    if isScalar then
-                        paramSubstitutions.[paramName] <- argSels
+                    // Store all parameter substitutions, not just scalar ones
+                    paramSubstitutions.[paramName] <- argSels
                 let result = visit (ExpressionNormalizer.toNormalizedExpression (lam.Body :> Expression))
                 for (paramName, _, isScalar) in argResults do
-                    if isScalar then
-                        paramSubstitutions.Remove(paramName) |> ignore
+                    paramSubstitutions.Remove(paramName) |> ignore
                 result
             | _ ->
                 visit args.[0]
