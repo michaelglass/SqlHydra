@@ -1399,30 +1399,24 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     let rec visit (nexp: NormalizedExpression) : Selection list =
         match nexp with
         | NMethodCall(m, args) when m.Method.Name = "Invoke" ->
-            // When invoking a lambda, check if arguments resolve to scalar selections.
-            // F# anonymous records in join contexts compile as nested Invoke chains:
+            // When invoking a lambda, substitute all parameters with their argument selections.
+            // F# anonymous records compile as nested Invoke chains:
             //   (fun fieldName -> New AnonRecord(..., fieldName)).Invoke(o.column)
-            // We only substitute parameters whose arguments resolve to scalar selections.
             match m.Object with
             | :? LambdaExpression as lam when lam.Parameters.Count = args.Length ->
-                let isScalarType (t: System.Type) =
-                    let unwrapped =
-                        if t.IsGenericType && (t.GetGenericTypeDefinition() = typedefof<Option<_>> || t.GetGenericTypeDefinition() = typedefof<System.Nullable<_>>) then
-                            t.GetGenericArguments().[0]
-                        else t
-                    unwrapped.IsPrimitive || unwrapped.IsValueType || unwrapped = typeof<string> || unwrapped = typeof<decimal>
                 let argResults =
                     [| for i in 0 .. lam.Parameters.Count - 1 do
-                        let paramType = lam.Parameters.[i].Type
-                        let isScalar = isScalarType paramType
-                        let argSels = visit args.[i]  // Visit argument regardless of scalar type
-                        yield (lam.Parameters.[i].Name, argSels, isScalar) |]
-                for (paramName, argSels, isScalar) in argResults do
-                    // Store all parameter substitutions, not just scalar ones
-                    paramSubstitutions.[paramName] <- argSels
+                        let argSels = visit args.[i]
+                        // Only store substitutions when they're safe (non-empty selections that aren't table references)
+                        let isValidSubstitution = argSels.Length > 0 && argSels |> List.exists (fun s -> match s with SelectedTable _ -> false | _ -> true)
+                        yield (lam.Parameters.[i].Name, argSels, isValidSubstitution) |]
+                for (paramName, argSels, isValidSubstitution) in argResults do
+                    if isValidSubstitution then
+                        paramSubstitutions.[paramName] <- argSels
                 let result = visit (ExpressionNormalizer.toNormalizedExpression (lam.Body :> Expression))
-                for (paramName, _, isScalar) in argResults do
-                    paramSubstitutions.Remove(paramName) |> ignore
+                for (paramName, _, isValidSubstitution) in argResults do
+                    if isValidSubstitution then
+                        paramSubstitutions.Remove(paramName) |> ignore
                 result
             | _ ->
                 visit args.[0]
@@ -1608,7 +1602,9 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     $"{left} {opStr} {right}"
                 | _ -> notImplMsg $"Unsupported expression in SELECT arithmetic: {nexp}"
             let sqlFragment = render (NBinary(left, op, right))
-            // Wrap in parentheses if there are parameters (indicating infix operators like <=> were used)
+            // Wrap in parentheses if the arithmetic involves infix operators (detected by presence of parameters).
+            // Infix operators like pgvector's <=> collect parameters that need parameterization.
+            // Without wrapping, precedence issues can arise in contexts like WHERE or ORDER BY.
             let wrapped = if parms.Count > 0 then $"({sqlFragment})" else sqlFragment
             [ SelectedExpression (wrapped, None, parms.ToArray()) ]
         | _ ->
