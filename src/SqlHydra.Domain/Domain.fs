@@ -124,7 +124,8 @@ and [<RequireQualifiedAccess>]
     | Option
     | Nullable
 
-type Provider = 
+[<NoComparison; NoEquality>]
+type Provider =
     {
         Id: string
         Name: string
