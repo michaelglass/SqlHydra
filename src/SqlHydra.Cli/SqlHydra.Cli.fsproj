@@ -9,7 +9,7 @@
 			<!-- Incomplete pattern matches on this expression. -->
 			FS0025
 		</WarningsAsErrors>
-		<NoWarn>
+		<NoWarn>FS1178;FS0066;FS1182;FS0064;FS0052;
 			<!-- Duplicate Package -->
 			NU1504
 		</NoWarn>
