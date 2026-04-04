@@ -2398,3 +2398,70 @@ let ``Issue125-14 OrderBy with aggregate after join``() =
         |> toSql
 
     sql.Contains("ORDER BY SUM(\"d\".\"unitprice\")") =! true
+
+// Regression: anonymous record select with mixed columns and aggregates
+// F# compiles anonymous records as nested Invoke chains.
+// When field names match column names (e.g., email = u.email), the parameter
+// substitution can fail, emitting "fieldName".* instead of "alias"."column".
+[<Test>]
+let ``Select anonymous record with columns and aggregates produces correct column references``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy (o.salesorderid, o.customerid)
+            select
+                {| salesorderid = o.salesorderid
+                   customerid = o.customerid
+                   total_items = countBy d.salesorderdetailid |}
+        }
+        |> toSql
+
+    // Column references must use the table alias, not the field name as a table
+    sql.Contains("\"salesorderid\".*") =! false
+    sql.Contains("\"customerid\".*") =! false
+    sql.Contains("\"o\".\"salesorderid\"") =! true
+    sql.Contains("\"o\".\"customerid\"") =! true
+    sql.Contains("COUNT(\"d\".\"salesorderdetailid\")") =! true
+
+[<Test>]
+let ``Select anonymous record with renamed columns produces AS aliases``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy o.salesorderid
+            select
+                {| order_id = o.salesorderid
+                   item_count = countBy d.salesorderdetailid |}
+        }
+        |> toSql
+
+    // Renamed columns should use AS alias
+    sql.Contains("\"o\".\"salesorderid\" AS \"order_id\"") =! true
+    sql.Contains("COUNT(\"d\".\"salesorderdetailid\") AS \"item_count\"") =! true
+
+[<Test>]
+let ``Select anonymous record with many fields does not produce star selects``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            join d in sales.salesorderdetail on (o.salesorderid = d.salesorderid)
+            groupBy (o.salesorderid, o.customerid, o.orderdate)
+            select
+                {| salesorderid = o.salesorderid
+                   customerid = o.customerid
+                   orderdate = o.orderdate
+                   price_total = sumBy d.unitprice
+                   item_count = countBy d.salesorderdetailid |}
+        }
+        |> toSql
+
+    // No field should be rendered as "fieldName".*
+    sql.Contains("\"salesorderid\".*") =! false
+    sql.Contains("\"customerid\".*") =! false
+    sql.Contains("\"orderdate\".*") =! false
+    // Proper column references
+    sql.Contains("\"o\".\"salesorderid\"") =! true
+    sql.Contains("\"o\".\"customerid\"") =! true
+    sql.Contains("\"o\".\"orderdate\"") =! true

@@ -1403,7 +1403,57 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
 let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
     // Map from parameter name to pre-computed selections (for Invoke substitution in anonymous record patterns)
     let paramSubstitutions = System.Collections.Generic.Dictionary<string, Selection list>()
-    let rec visit (nexp: NormalizedExpression) : Selection list =
+    /// Visits a lambda body without normalizing through ExpressionNormalizer, which strips
+    /// Invoke(Lambda) nodes. Instead, checks if the body is itself an Invoke on a Lambda
+    /// (the nested anonymous record pattern) and preserves it as NMethodCall so that `visit`
+    /// can process parameter substitutions correctly.
+    let rec visitBodyPreservingInvokes (body: Expression) : Selection list =
+        match body with
+        | :? MethodCallExpression as m when m.Method.Name = "Invoke" && m.Object <> null ->
+            let normalizedArgs = m.Arguments |> Seq.map ExpressionNormalizer.toNormalizedExpression |> Seq.toList
+            visit (NMethodCall(m, normalizedArgs))
+        | :? BlockExpression as blk ->
+            // .NET 10+ F# compiles anonymous records as nested Block expressions with
+            // variable assignments instead of nested Invoke(Lambda) chains.
+            // Extract Assign expressions and store them as parameter substitutions so
+            // that the NNew handler can resolve local variable references.
+            // Only apply this for Blocks whose final expression is a NewExpression
+            // (anonymous record constructor) — NOT for tuples or other Block patterns.
+            let lastExpr = blk.Expressions |> Seq.last
+            let rec unwrapToFinalExpr (e: Expression) =
+                match e with
+                | :? BlockExpression as inner -> unwrapToFinalExpr (inner.Expressions |> Seq.last)
+                | _ -> e
+            let finalExpr = unwrapToFinalExpr lastExpr
+            let isAnonRecordNew =
+                match finalExpr with
+                | :? NewExpression as n ->
+                    let t = n.Type
+                    not (t.Namespace = "System" && (t.Name.StartsWith("Tuple") || t.Name.StartsWith("ValueTuple")))
+                | _ -> false
+            if isAnonRecordNew then
+                let assignedVars = ResizeArray<string>()
+                for expr in blk.Expressions do
+                    match expr with
+                    | :? BinaryExpression as b when b.NodeType = ExpressionType.Assign ->
+                        match b.Left with
+                        | :? ParameterExpression as p ->
+                            let argSels = visit (ExpressionNormalizer.toNormalizedExpression b.Right)
+                            let isValid = argSels.Length > 0 && argSels |> List.exists (fun s -> match s with SelectedTable _ -> false | _ -> true)
+                            if isValid then
+                                paramSubstitutions.[p.Name] <- argSels
+                                assignedVars.Add(p.Name)
+                        | _ -> ()
+                    | _ -> ()
+                let result = visitBodyPreservingInvokes lastExpr
+                for v in assignedVars do
+                    paramSubstitutions.Remove(v) |> ignore
+                result
+            else
+                visitBodyPreservingInvokes lastExpr
+        | _ ->
+            visit (ExpressionNormalizer.toNormalizedExpression body)
+    and visit (nexp: NormalizedExpression) : Selection list =
         match nexp with
         | NMethodCall(m, args) when m.Method.Name = "Invoke" ->
             // When invoking a lambda, substitute all parameters with their argument selections.
@@ -1420,7 +1470,10 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                 for (paramName, argSels, isValidSubstitution) in argResults do
                     if isValidSubstitution then
                         paramSubstitutions.[paramName] <- argSels
-                let result = visit (ExpressionNormalizer.toNormalizedExpression (lam.Body :> Expression))
+                // Use visitBodyPreservingInvokes to avoid ExpressionNormalizer stripping
+                // nested Invoke(Lambda) nodes, which breaks parameter substitution for
+                // anonymous records with multiple fields (each field is a nested Invoke).
+                let result = visitBodyPreservingInvokes lam.Body
                 for (paramName, _, isValidSubstitution) in argResults do
                     if isValidSubstitution then
                         paramSubstitutions.Remove(paramName) |> ignore
@@ -1617,5 +1670,8 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
         | _ ->
             notImpl()
 
-    visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
+    // Use visitBodyPreservingInvokes to avoid ExpressionNormalizer stripping Invoke(Lambda)
+    // nodes at the entry point. The select expression for anonymous records is a chain of
+    // Invoke(Lambda) nodes that must be preserved for parameter substitution to work.
+    visitBodyPreservingInvokes propertySelector.Body
 
