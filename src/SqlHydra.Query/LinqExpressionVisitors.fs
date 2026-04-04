@@ -146,7 +146,7 @@ let private isScalarType (t: System.Type) =
                 t.GetGenericArguments().[0]
             else t
         else t
-    unwrapped.IsPrimitive || unwrapped.IsValueType || unwrapped = typeof<string> || unwrapped = typeof<decimal>
+    unwrapped.IsValueType || unwrapped = typeof<string>
 
 [<AutoOpen>]
 module SqlPatterns =
@@ -416,9 +416,7 @@ module NormalizedPatterns =
     let (|NAggregateColumn|_|) (nexp: NormalizedExpression) =
         match nexp with
         | NMethodCall(m, _) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
-            let aggType =
-                if m.Method.Name = nameof countDistinct then "COUNTDISTINCT"
-                else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+            let aggType = aggTypeFromMethodName m.Method.Name
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
             | _ -> None
@@ -544,33 +542,10 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
         let thenValue = renderExpressionAsSql qualifyColumn parameters m.Arguments.[1]
         let elseValue = renderExpressionAsSql qualifyColumn parameters m.Arguments.[2]
         $"CASE WHEN {condition} THEN {thenValue} ELSE {elseValue} END"
-    | MethodCall m when m.Arguments.Count = 2 &&
-                       (InfixOperators.tryGetOperator m.Method.Name).IsSome ->
-        let infixOp = (InfixOperators.tryGetOperator m.Method.Name).Value
-        let renderArg (arg: Expression) =
-            match arg with
-            | Member mem when mem.Expression <> null ->
-                let alias = visitAlias mem.Expression
-                qualifyColumn alias mem.Member
-            | Member mem ->
-                let value = compileAndEvaluateExpression (mem :> Expression)
-                parameters.Add(if isNull value then box System.DBNull.Value else value)
-                "?"
-            | MethodCall mc when mc.Method.Name = "inlineValue" && mc.Arguments.Count = 1 ->
-                let value = compileAndEvaluateExpression mc.Arguments.[0]
-                parameters.Add(value)
-                "?"
-            | MethodCall _ as nested -> visitSqlFn qualifyColumn parameters nested
-            | Constant c -> sprintf "%O" c.Value
-            | _ -> notImplMsg $"Unsupported argument in pgvector distance function: {arg.NodeType}"
-        let left = renderArg m.Arguments.[0]
-        let right = renderArg m.Arguments.[1]
-        $"({left} {infixOp} {right})"
     | MethodCall m ->
-        let fnName = m.Method.Name
-        let args =
-            m.Arguments
-            |> Seq.map (fun arg ->
+        match (if m.Arguments.Count = 2 then InfixOperators.tryGetOperator m.Method.Name else None) with
+        | Some infixOp ->
+            let renderArg (arg: Expression) =
                 match arg with
                 | Member mem when mem.Expression <> null ->
                     let alias = visitAlias mem.Expression
@@ -579,26 +554,48 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (parameters: 
                     let value = compileAndEvaluateExpression (mem :> Expression)
                     parameters.Add(if isNull value then box System.DBNull.Value else value)
                     "?"
-                | Constant c when c.Value = null ->
-                    "NULL"
-                | Constant c when c.Type = typeof<string> ->
-                    $"'{c.Value}'"
-                | Constant c ->
-                    sprintf "%O" c.Value
                 | MethodCall mc when mc.Method.Name = "inlineValue" && mc.Arguments.Count = 1 ->
                     let value = compileAndEvaluateExpression mc.Arguments.[0]
                     parameters.Add(value)
                     "?"
-                | MethodCall _ as nested ->
-                    // Handle nested function calls and aggregates
-                    renderExpressionAsSql qualifyColumn parameters nested
-                | Unary u when u.NodeType = ExpressionType.Convert ->
-                    renderExpressionAsSql qualifyColumn parameters u.Operand
-                | _ ->
-                    notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
-            )
-            |> String.concat ", "
-        $"{fnName}({args})"
+                | MethodCall _ as nested -> visitSqlFn qualifyColumn parameters nested
+                | Constant c -> sprintf "%O" c.Value
+                | _ -> notImplMsg $"Unsupported argument in pgvector distance function: {arg.NodeType}"
+            let left = renderArg m.Arguments.[0]
+            let right = renderArg m.Arguments.[1]
+            $"({left} {infixOp} {right})"
+        | None ->
+            let fnName = m.Method.Name
+            let args =
+                m.Arguments
+                |> Seq.map (fun arg ->
+                    match arg with
+                    | Member mem when mem.Expression <> null ->
+                        let alias = visitAlias mem.Expression
+                        qualifyColumn alias mem.Member
+                    | Member mem ->
+                        let value = compileAndEvaluateExpression (mem :> Expression)
+                        parameters.Add(if isNull value then box System.DBNull.Value else value)
+                        "?"
+                    | Constant c when c.Value = null ->
+                        "NULL"
+                    | Constant c when c.Type = typeof<string> ->
+                        $"'{c.Value}'"
+                    | Constant c ->
+                        sprintf "%O" c.Value
+                    | MethodCall mc when mc.Method.Name = "inlineValue" && mc.Arguments.Count = 1 ->
+                        let value = compileAndEvaluateExpression mc.Arguments.[0]
+                        parameters.Add(value)
+                        "?"
+                    | MethodCall _ as nested ->
+                        renderExpressionAsSql qualifyColumn parameters nested
+                    | Unary u when u.NodeType = ExpressionType.Convert ->
+                        renderExpressionAsSql qualifyColumn parameters u.Operand
+                    | _ ->
+                        notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
+                )
+                |> String.concat ", "
+            $"{fnName}({args})"
     | _ ->
         notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
 
@@ -1181,7 +1178,6 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                     qualifyColumn alias p2.Member
                 query.HavingRaw($"{renderAggregate aggType lt} {comparison} {rt}")
             | NAggregateColumn (aggType, (p, _)), NValue value ->
-                // Handle aggregate column to value comparisons
                 let alias = visitAlias p.Expression
                 let lt = qualifyColumn alias p.Member
                 query.HavingRaw($"{renderAggregate aggType lt} {comparison} ?", [value])

@@ -276,12 +276,11 @@ module NullsStore =
         | Some suffix ->
             let orderByIdx = sql.LastIndexOf("ORDER BY")
             if orderByIdx >= 0 then
-                let afterOrderBy = sql.Substring(orderByIdx)
                 let endIdx =
                     clauseTerminators
                     |> List.choose (fun kw ->
-                        let i = afterOrderBy.IndexOf(kw)
-                        if i > 0 then Some (orderByIdx + i) else None)
+                        let i = sql.IndexOf(kw, orderByIdx)
+                        if i > orderByIdx then Some i else None)
                     |> function [] -> sql.Length | xs -> List.min xs
                 sql.Insert(endIdx, $" {suffix}")
             else sql

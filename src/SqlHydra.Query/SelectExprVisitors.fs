@@ -624,9 +624,7 @@ let visitSelectExpr<'T, 'Selected> (selectExpression: Expression<Func<'T, 'Selec
             | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
             | Constant c -> sprintf "%O" c.Value
             | MethodCall m when List.contains m.Method.Name [ "minBy"; "maxBy"; "sumBy"; "avgBy"; "countBy"; "countDistinct"; "avgByAs" ] ->
-                let aggType =
-                    if m.Method.Name = "countDistinct" then "COUNTDISTINCT"
-                    else m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+                let aggType = SqlPatterns.aggTypeFromMethodName m.Method.Name
                 match m.Arguments.[0] with
                 | Member mem ->
                     let alias = resolveAliasFromExpr mem.Expression
