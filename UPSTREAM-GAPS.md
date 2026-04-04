@@ -2,18 +2,10 @@
 
 ## 1. General Gaps
 
-### Anonymous record + aggregate column aliasing bug
+### ~~Anonymous record + aggregate column aliasing bug~~ (FIXED)
 
-When mixing aggregates with plain columns in an anonymous record SELECT:
-```fsharp
-select {| OrderId = o.salesorderid; ItemCount = countDistinct d.salesorderdetailid |}
-```
-Produces: `SELECT COUNT(DISTINCT "d"."salesorderdetailid") AS "ItemCount", "OrderId".*`
-Expected: `... "o"."salesorderid" AS "OrderId"`
-
-`SelectExprVisitors` treats the plain column as a table reference when an aggregate is also present.
-
-**Workaround**: None clean — you have to avoid mixing aggregates with plain columns in anonymous record projections, or use `rawExpr` for the aggregate part.
+Fixed in `daf9a7f`. .NET 10 F# compiles anonymous records as Block+Assign expressions
+instead of Invoke(Lambda) chains. `visitSelect` now handles both patterns.
 
 ### Silent runtime failures after SqlHydra version upgrade
 
