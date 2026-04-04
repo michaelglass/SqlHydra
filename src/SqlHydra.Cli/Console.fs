@@ -5,9 +5,9 @@ open System.IO
 open Spectre.Console
 open SqlHydra.Domain
 
-type Args = 
+type Args =
     {
-        Provider: Provider
+        Provider: ISqlHydraDbProvider
         TomlFile: FileInfo
         Project: FileInfo
         Version: Version.InformationalVersion
@@ -51,7 +51,7 @@ let newConfigWizard (args: Args) =
             Config.TableDeclarations = true
             Config.Readers = None
             Config.Filters = Filters.Empty // User must manually configure filter in .toml file
-            Config.CustomTypeMappings = Map.empty
+            Config.TypeMappingExtensions = []
         }
 
     AnsiConsole.MarkupLine($"[green]-[/] {args.TomlFile.Name} has been created!")
@@ -137,14 +137,22 @@ let run (args: Args) =
     // Ensure the output directory exists (`cfg.OutputFile` may contain subdirectories).
     outputFile.Directory.Create()
 
+    // Load extensions: auto-scan the target project + any TOML-configured external extensions
+    let extensions =
+        let projectExts = Extensions.scanProject args.Project
+        let namedExts = Extensions.loadNamed args.Project cfg.TypeMappingExtensions
+        projectExts @ namedExts
+
     let generatedCode =
         let isLegacy = Fsproj.targetsLegacyFramework args.Project
         printLegacyStatus isLegacy
-        let schema = args.Provider.GetSchema(cfg, isLegacy)
-        SchemaTemplate.generate cfg args.Provider schema args.Version
+        let typeMappingExts = extensions |> Extensions.ofType<IExtendTypeMapping>
+        //let namingExts = extensions |> Extensions.ofType<IExtendNaming> // TODO: enable once IExtendNaming is stable
+        let namingExts : IExtendNaming list = []
+        let schema = args.Provider.GetSchema(cfg, isLegacy, typeMappingExts)
+        SchemaTemplate.generate cfg args.Provider schema args.Version namingExts
         |> formatCodeWithFantomas
         
-
     File.WriteAllText(outputFile.FullName, generatedCode)
     Fsproj.addFileToProject args.Project cfg
     AnsiConsole.WriteLine()

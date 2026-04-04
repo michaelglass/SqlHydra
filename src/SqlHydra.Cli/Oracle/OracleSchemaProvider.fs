@@ -18,19 +18,18 @@ let getColumnSchema (conn: OracleConnection) =
     adapter.Fill(dataTable) |> ignore
     dataTable
 
-let getSchema (cfg: Config, isLegacy: bool) : Schema =
+let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
     use conn = new OracleConnection(cfg.ConnectionString)
     conn.Open()
     let sTables = conn.GetSchema("Tables", cfg.Filters.TryGetRestrictionsByKey("Tables"))
-    //let sColumns = conn.GetSchema("Columns", cfg.Filters.TryGetRestrictionsByKey("Columns"))
     let sColumns = getColumnSchema conn
     let sViews = conn.GetSchema("Views", cfg.Filters.TryGetRestrictionsByKey("Views"))
 
-    let systemOwners = 
-        ["SYS"; "MDSYS"; "OLAPSYS"; "WMSYS"; "CTXSYS"; "XDB"; "GSMADMIN_INTERNAL"; "ORDSYS"; "ORDDATA"; "LBACSYS"; "SYSTEM"] 
+    let systemOwners =
+        ["SYS"; "MDSYS"; "OLAPSYS"; "WMSYS"; "CTXSYS"; "XDB"; "GSMADMIN_INTERNAL"; "ORDSYS"; "ORDDATA"; "LBACSYS"; "SYSTEM"]
         |> Set.ofList
 
-    let pks = 
+    let pks =
         let sql =
             """
             SELECT cols.table_name, cols.column_name, cols.position, cons.status, cons.owner
@@ -52,105 +51,126 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
         ]
         |> Set.ofList
 
-    let columns = 
+    let allColumns =
         sColumns.Rows
         |> Seq.cast<DataRow>
         |> Seq.filter (fun col -> not (systemOwners.Contains(col.["OWNER"] :?> string)))
-        |> Seq.map (fun col -> 
-            {| 
-                TableCatalog = col.["OWNER"] :?> string
-                TableSchema = col.["OWNER"] :?> string
-                TableName = col.["TABLE_NAME"] :?> string
-                ColumnName = col.["COLUMN_NAME"] :?> string
-                ProviderTypeName = col.["DATATYPE"] :?> string
-                //OrdinalPosition = col.["ORDINAL_POSITION"] :?> int
-                Precision = 
+        |> Seq.map (fun col ->
+            let owner = col.["OWNER"] :?> string
+            let table = col.["TABLE_NAME"] :?> string
+            let name = col.["COLUMN_NAME"] :?> string
+            {
+                ColumnSchema.Catalog = owner
+                ColumnSchema.Schema = owner
+                ColumnSchema.Table = table
+                ColumnSchema.Name = name
+                ColumnSchema.ProviderTypeName = col.["DATATYPE"] :?> string
+                ColumnSchema.Ordinal = 0
+                ColumnSchema.IsNullable = col.["NULLABLE"] :?> string = "Y"
+                ColumnSchema.Precision =
                     match col.["PRECISION"] with
                     | :? decimal as precision -> Some (int precision)
                     | _ -> None
-                Scale = 
+                ColumnSchema.Scale =
                     match col.["SCALE"] with
                     | :? decimal as scale -> Some (int scale)
                     | _ -> None
-                IsNullable = col.["NULLABLE"] :?> string = "Y"
-            |}
+                ColumnSchema.IsPrimaryKey = pks.Contains(owner, table, name)
+                ColumnSchema.IsComputed = false
+                ColumnSchema.DefaultValue = None
+            }
         )
-        //|> Seq.sortBy (fun column -> column.OrdinalPosition)
-        |> Seq.sortBy (fun column -> column.ColumnName)
+        |> Seq.sortBy (fun col -> col.Name)
         |> Seq.toList
 
-    let views = 
-        sViews.Rows
-        |> Seq.cast<DataRow>
-        |> Seq.filter (fun view -> not (systemOwners.Contains(view.["OWNER"] :?> string)))
-        |> Seq.map (fun view -> 
-            {| 
-                Catalog = view.["OWNER"] :?> string
-                Schema = view.["OWNER"] :?> string
-                Name  = view.["VIEW_NAME"] :?> string
-                Type = "view"
-            |}
-        )
-        |> Seq.toList
-        
-    let tables = 
+    let columnsByTable =
+        allColumns
+        |> List.groupBy (fun col -> col.Catalog, col.Schema, col.Table)
+        |> Map.ofList
+
+    let tableSchemas =
+        let views =
+            sViews.Rows
+            |> Seq.cast<DataRow>
+            |> Seq.filter (fun view -> not (systemOwners.Contains(view.["OWNER"] :?> string)))
+            |> Seq.map (fun view ->
+                let owner = view.["OWNER"] :?> string
+                let name = view.["VIEW_NAME"] :?> string
+                {
+                    TableSchema.Catalog = owner
+                    TableSchema.Schema = owner
+                    TableSchema.Name = name
+                    TableSchema.Type = TableType.View
+                    TableSchema.Columns =
+                        columnsByTable
+                        |> Map.tryFind (owner, owner, name)
+                        |> Option.defaultValue []
+                }
+            )
+            |> Seq.toList
+
         sTables.Rows
         |> Seq.cast<DataRow>
-        |> Seq.map (fun tbl -> 
-            {| 
-                Catalog = tbl.["OWNER"] :?> string
-                Schema = tbl.["OWNER"] :?> string
-                Name  = tbl.["TABLE_NAME"] :?> string
-                Type = tbl.["TYPE"] :?> string // [ "view"; "User"; "System" ]
-            |}
+        |> Seq.filter (fun tbl -> System.String.Compare(tbl.["TYPE"] :?> string, "System", true) <> 0)
+        |> Seq.map (fun tbl ->
+            let owner = tbl.["OWNER"] :?> string
+            let name = tbl.["TABLE_NAME"] :?> string
+            {
+                TableSchema.Catalog = owner
+                TableSchema.Schema = owner
+                TableSchema.Name = name
+                TableSchema.Type = TableType.Table
+                TableSchema.Columns =
+                    columnsByTable
+                    |> Map.tryFind (owner, owner, name)
+                    |> Option.defaultValue []
+            }
         )
-        |> Seq.filter (fun tbl -> System.String.Compare(tbl.Type, "System", true) <> 0) // Exclude system
-        |> Seq.append views
+        |> Seq.toList
+        |> fun tables -> tables @ views
         |> SchemaFilters.filterTables cfg.Filters
-        |> Seq.choose (fun tbl -> 
-            let tableColumns = 
-                columns
-                |> Seq.filter (fun col -> 
-                    col.TableCatalog = tbl.Catalog && 
-                    col.TableSchema = tbl.Schema &&
-                    col.TableName = tbl.Name
-                )                
-                
+        |> Seq.toList
+
+    let tryFindTypeMapping =
+        let baseTryFind = OracleDataTypes.tryFindTypeMapping
+        extensions |> List.fold (fun acc (ext: IExtendTypeMapping) -> ext.Extend(acc)) baseTryFind
+
+    let tables =
+        tableSchemas
+        |> List.choose (fun tableSchema ->
             let supportedColumns =
-                tableColumns
-                |> Seq.choose (fun col ->
-                    let typeMapping =
-                        CustomTypeMappingHelper.tryFind cfg.CustomTypeMappings col.ProviderTypeName
-                        |> Option.orElseWith (fun () -> OracleDataTypes.tryFindTypeMapping (col.ProviderTypeName, col.Precision, col.Scale))
-                    typeMapping
+                tableSchema.Columns
+                |> List.choose (fun col ->
+                    let ctx = { TypeMappingContext.Table = tableSchema; TypeMappingContext.Column = col }
+                    tryFindTypeMapping ctx
                     |> Option.map (fun typeMapping ->
-                        { 
-                            Column.Name = col.ColumnName
+                        {
+                            Column.Name = col.Name
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
-                            Column.IsPK = pks.Contains(col.TableSchema, col.TableName, col.ColumnName)
+                            Column.IsPK = col.IsPrimaryKey
                         }
                     )
                 )
 
             let filteredColumns =
                 supportedColumns
-                |> SchemaFilters.filterColumns cfg.Filters tbl.Schema tbl.Name
+                |> SchemaFilters.filterColumns cfg.Filters tableSchema.Schema tableSchema.Name
                 |> Seq.toList
 
-            if filteredColumns |> Seq.isEmpty then 
+            if filteredColumns |> Seq.isEmpty then
                 None
             else
-                Some { 
-                    Table.Catalog = tbl.Catalog
-                    Table.Schema = tbl.Schema
-                    Table.Name =  tbl.Name
-                    Table.Type = if System.String.Compare(tbl.Type, "view", true) = 0 then TableType.View else TableType.Table
+                Some {
+                    Table.Catalog = tableSchema.Catalog
+                    Table.Schema = tableSchema.Schema
+                    Table.Name = tableSchema.Name
+                    Table.Type = tableSchema.Type
                     Table.Columns = filteredColumns
-                    Table.TotalColumns = tableColumns |> Seq.length
+                    Table.TotalColumns = tableSchema.Columns |> List.length
                 }
         )
-        |> Seq.filter (fun t -> not (systemOwners.Contains t.Schema)) // Exclude Oracle system tables
+        |> List.filter (fun t -> not (systemOwners.Contains t.Schema))
         |> Seq.toList
 
     {

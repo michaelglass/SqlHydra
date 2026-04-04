@@ -26,6 +26,8 @@
       <Visible>False</Visible>
     </Compile>
     <Compile Include="Util.fs" />
+    <Compile Include="Sqlite\TextTypeMapping.fs" />
+    <Compile Include="Sqlite\PascalCaseNaming.fs" />
     <Compile Include="Sqlite\AdventureWorksNet8.fs" Condition="'$(TargetFramework)' == 'net8.0'" />
     <Compile Include="Sqlite\AdventureWorksNet9.fs" Condition="'$(TargetFramework)' == 'net9.0'" />
     <Compile Include="Sqlite\AdventureWorksNet10.fs" Condition="'$(TargetFramework)' == 'net10.0'" />

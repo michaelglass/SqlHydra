@@ -230,15 +230,15 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
     /// Sets the ORDER BY for single column
     [<CustomOperation("orderBy", MaintainsVariableSpace = true)>]
-    member this.OrderBy (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) = 
-        let orderedQuery = 
+    member this.OrderBy (state: QuerySource<'T, Query>, [<ProjectionParameter>] propertySelector) =
+        let orderedQuery =
             LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
-            |> function 
-                | LinqExpressionVisitors.OrderByColumn (tableAlias, p) -> 
+            |> function
+                | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
                     state.Query.OrderBy(fqCol)
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
-                    let fqCol = $"%s{tableAlias}.%s{p.Name}"
+                    let fqCol = $"[%s{tableAlias}].[%s{p.Name}]"
                     let aggFragment = LinqExpressionVisitors.NormalizedPatterns.renderAggregate aggType fqCol
                     state.Query.OrderByRaw(aggFragment)
                 | LinqExpressionVisitors.OrderByExpression (sqlFragment, parms) ->
@@ -262,7 +262,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     let fqCol = $"%s{tableAlias}.%s{p.Name}"
                     state.Query.OrderByDesc(fqCol)
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
-                    let fqCol = $"%s{tableAlias}.%s{p.Name}"
+                    let fqCol = $"[%s{tableAlias}].[%s{p.Name}]"
                     let aggFragment = LinqExpressionVisitors.NormalizedPatterns.renderAggregate aggType fqCol
                     state.Query.OrderByRaw($"%s{aggFragment} DESC")
                 | LinqExpressionVisitors.OrderByExpression (sqlFragment, parms) ->

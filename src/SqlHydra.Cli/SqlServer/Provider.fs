@@ -1,15 +1,15 @@
-﻿module SqlHydra.SqlServer.Provider
+module SqlHydra.SqlServer.Provider
 
 open SqlHydra.Domain
 
-let provider = 
-    {
-        Provider.Id = "mssql"
-        Provider.Name = "SqlHydra.SqlServer"
-        Provider.Type = SqlServer
-        Provider.DefaultReaderType = "Microsoft.Data.SqlClient.SqlDataReader"
-        Provider.DefaultProvider = "Microsoft.Data.SqlClient"
-        Provider.GetSchema = SqlServerSchemaProvider.getSchema
+let instance: ISqlHydraDbProvider =
+    { new ISqlHydraDbProvider with
+        member _.Id = "mssql"
+        member _.Name = "SqlHydra.SqlServer"
+        member _.Type = SqlServer
+        member _.DefaultReaderType = "Microsoft.Data.SqlClient.SqlDataReader"
+        member _.DefaultProvider = "Microsoft.Data.SqlClient"
+        member _.SqlKataCompiler = "SqlKata.Compilers.SqlServerCompiler()"
+        member _.ProviderConnectionType = "Microsoft.Data.SqlClient.SqlConnection"
+        member _.GetSchema(cfg, isLegacy, extensions) = SqlServerSchemaProvider.getSchema(cfg, isLegacy, extensions)
     }
-    
-    

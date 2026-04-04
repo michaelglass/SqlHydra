@@ -7,13 +7,14 @@ open SqlKata
 /// This module auto-initializes when any type in this assembly is accessed.
 [<AutoOpen>]
 module PgvectorRegistration =
-    let private registerOperators () =
+    let private _doRegister =
         InfixOperators.register "cosine_distance" "<=>"
         InfixOperators.register "l2_distance" "<->"
         InfixOperators.register "inner_product_distance" "<#>"
 
     /// Call to ensure pgvector infix operators are registered.
-    let ensureRegistered () = registerOperators()
+    /// This is a no-op but forces module initialization.
+    let ensureRegistered () = _doRegister
 
 /// pgvector distance functions for use in select expressions and order by clauses.
 /// Use `open type PgvectorFn` to access functions without qualification.

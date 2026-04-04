@@ -1054,6 +1054,17 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                         | _ -> notImplMsg "Unsupported comparison on left-joined table parameter"
                 | _ -> notImplMsg "Left-joined table parameter can only be compared to None"
 
+            // Joined table parameter compared to None (e.g., where (d = None) after leftJoin')
+            // When a left join has no match, all columns are NULL — use the first record field for the check.
+            | NParameter p, _ | _, NParameter p when p.Type |> isOptionType ->
+                let innerType = p.Type.GetGenericArguments().[0]
+                let firstField = FSharp.Reflection.FSharpType.GetRecordFields(innerType).[0]
+                let fqCol = qualifyColumn p.Name firstField
+                match op with
+                | ExpressionType.Equal -> query.WhereNull(fqCol)
+                | ExpressionType.NotEqual -> query.WhereNotNull(fqCol)
+                | _ -> notImplMsg $"Unsupported comparison for joined table parameter: {op}"
+
             | NValue _, NValue _ ->
                 notImplMsg("Value to value comparisons are not currently supported. Ex: where (1 = 1)")
             | _ ->

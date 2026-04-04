@@ -58,37 +58,39 @@ let typeMappingsByName =
     )
     |> Map.ofList
 
-let tryFindTypeMapping (providerTypeName: string, precisionMaybe: int option, scaleMaybe: int option) =
-    typeMappingsByName.TryFind (providerTypeName.ToUpper())
-    |> Option.map (fun mapping ->
-        match mapping.ColumnTypeAlias with
-        | "NUMBER" ->
-            match precisionMaybe, scaleMaybe with
-            // Untyped NUMBER → double
-            | None, None
-            | Some 0, None
-            | Some 0, Some -127 ->
-                { mapping with ClrType = "double"; DbType = DbType.Double }
+/// Adjusts a NUMBER type mapping based on Oracle precision/scale metadata.
+let adjustForPrecisionScale (mapping: TypeMapping) (precisionMaybe: int option) (scaleMaybe: int option) =
+    match mapping.ColumnTypeAlias with
+    | "NUMBER" ->
+        match precisionMaybe, scaleMaybe with
+        // Untyped NUMBER → double
+        | None, None
+        | Some 0, None
+        | Some 0, Some -127 ->
+            { mapping with ClrType = "double"; DbType = DbType.Double }
 
-            // Fractional → decimal
-            | _, Some s when s > 0 ->
-                { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
+        // Fractional → decimal
+        | _, Some s when s > 0 ->
+            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
 
-            // Integer NUMBER
-            | Some p, Some 0 when p <= 9 ->
-                { mapping with ClrType = "int"; DbType = DbType.Int32 }
+        // Integer NUMBER
+        | Some p, Some 0 when p <= 9 ->
+            { mapping with ClrType = "int"; DbType = DbType.Int32 }
 
-            | Some p, Some 0 when p <= 18 ->
-                { mapping with ClrType = "int64"; DbType = DbType.Int64 }
+        | Some p, Some 0 when p <= 18 ->
+            { mapping with ClrType = "int64"; DbType = DbType.Int64 }
 
-            // Large integer → decimal
-            | Some _, Some 0 ->
-                { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
+        // Large integer → decimal
+        | Some _, Some 0 ->
+            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
 
-            // Fallback
-            | _ ->
-                { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
-
+        // Fallback
         | _ ->
-            mapping
-    )
+            { mapping with ClrType = "decimal"; DbType = DbType.Decimal }
+
+    | _ ->
+        mapping
+
+let tryFindTypeMapping (ctx: TypeMappingContext) =
+    typeMappingsByName.TryFind (ctx.Column.ProviderTypeName.ToUpper())
+    |> Option.map (fun m -> adjustForPrecisionScale m ctx.Column.Precision ctx.Column.Scale)

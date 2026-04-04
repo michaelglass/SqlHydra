@@ -77,5 +77,5 @@ let typeMappingsByName isLegacy =
 
 let tryFindTypeMapping isLegacy =
     let map = typeMappingsByName isLegacy
-    let toLower (str: string) = str.ToLower().Trim()
-    toLower >> map.TryFind
+    fun (ctx: TypeMappingContext) ->
+        map.TryFind (ctx.Column.ProviderTypeName.ToLower().Trim())

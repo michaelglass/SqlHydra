@@ -68,5 +68,5 @@ let typeMappingsByName isLegacy =
 
 let tryFindTypeMapping isLegacy =
     let map = typeMappingsByName isLegacy
-    let toUpper (str: string) = str.ToUpper()
-    toUpper >> map.TryFind
+    fun (ctx: TypeMappingContext) ->
+        map.TryFind (ctx.Column.ProviderTypeName.ToUpper())

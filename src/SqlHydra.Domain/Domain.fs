@@ -115,8 +115,8 @@ type Config =
         /// Filters: optional filters for schemas, tables and columns
         Filters: Filters
 
-        /// Custom type mappings: database column type → F# CLR type
-        CustomTypeMappings: Map<string, string>
+        /// Extensions: type mapping extension assembly names
+        TypeMappingExtensions: string list
     }
 
 and [<RequireQualifiedAccess>] 
@@ -124,34 +124,68 @@ and [<RequireQualifiedAccess>]
     | Option
     | Nullable
 
-[<NoComparison; NoEquality>]
-type Provider =
-    {
-        Id: string
-        Name: string
-        Type: ProviderType
-        DefaultReaderType: string
-        DefaultProvider: string
-        GetSchema: Config * bool -> Schema
-    }
-
-and ProviderType =
+type ProviderType =
     | SqlServer
     | Npgsql
     | Sqlite
     | MySql
     | Oracle
+    | Custom of string
 
-module CustomTypeMappingHelper =
-    /// Tries to find a custom type mapping from user-configured mappings.
-    let tryFind (customMappings: Map<string, string>) (typeName: string) : TypeMapping option =
-        if customMappings.IsEmpty then None
-        else
-            customMappings.TryFind (typeName.ToLower().Trim())
-            |> Option.map (fun clrType ->
-                {
-                    TypeMapping.ColumnTypeAlias = typeName
-                    TypeMapping.ClrType = clrType
-                    TypeMapping.DbType = System.Data.DbType.Object
-                    TypeMapping.ProviderDbType = None
-                })
+type ColumnSchema =
+    {
+        Catalog: string
+        Schema: string
+        Table: string
+        Name: string
+        ProviderTypeName: string
+        IsNullable: bool
+        Ordinal: int
+        Precision: int option
+        Scale: int option
+        IsPrimaryKey: bool
+        IsComputed: bool
+        DefaultValue: string option
+    }
+
+type TableSchema =
+    {
+        Catalog: string
+        Schema: string
+        Name: string
+        Type: TableType
+        Columns: ColumnSchema list
+    }
+
+type ISqlHydraExtension = interface end
+
+type TypeMappingContext =
+    {
+        Table: TableSchema
+        Column: ColumnSchema
+    }
+
+type IExtendTypeMapping =
+    inherit ISqlHydraExtension
+    abstract member Extend: baseTryFind: (TypeMappingContext -> TypeMapping option) -> (TypeMappingContext -> TypeMapping option)
+
+type NamingContext =
+    {
+        Table: Table
+        Column: Column option
+    }
+
+type IExtendNaming =
+    inherit ISqlHydraExtension
+    abstract member ExtendTableName: baseFn: (NamingContext -> string) -> (NamingContext -> string)
+    abstract member ExtendColumnName: baseFn: (NamingContext -> string) -> (NamingContext -> string)
+
+type ISqlHydraDbProvider =
+    abstract member Id: string
+    abstract member Name: string
+    abstract member Type: ProviderType
+    abstract member DefaultReaderType: string
+    abstract member DefaultProvider: string
+    abstract member SqlKataCompiler: string
+    abstract member ProviderConnectionType: string
+    abstract member GetSchema: cfg: Config * isLegacy: bool * extensions: IExtendTypeMapping list -> Schema

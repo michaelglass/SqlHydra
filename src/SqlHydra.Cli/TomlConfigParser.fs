@@ -24,8 +24,8 @@ let read(toml: string) =
     let generalTable = model.Get<TomlTable> "general"
     let readersTableMaybe = model.TryGet<TomlTable> "readers"
     let filtersTableMaybe = model.TryGet<TomlTable> "filters"
+    let extensionsTableMaybe = model.TryGet<TomlTable> "extensions"
     let queryIntegrationTableMaybe = model.TryGet<TomlTable> "sqlhydra_query_integration"
-    let customTypeMappingsTableMaybe = model.TryGet<TomlTable> "custom_type_mappings"
 
     {
         Config.ConnectionString = generalTable.Get "connection"
@@ -60,7 +60,14 @@ let read(toml: string) =
                     ReadersConfig.ReaderType = rdrsTbl.Get<string> "reader_type"
                 }
             )
-        Config.Filters = 
+        Config.TypeMappingExtensions =
+            match extensionsTableMaybe with
+            | Some extTable ->
+                extTable.TryGet "type_mappings"
+                |> Option.map (Seq.cast<string> >> Seq.toList)
+                |> Option.defaultValue []
+            | None -> []
+        Config.Filters =
             match filtersTableMaybe with
             | Some filtersTable -> 
                 {
@@ -83,16 +90,6 @@ let read(toml: string) =
                 }
             | None ->
                 Filters.Empty
-        Config.CustomTypeMappings =
-            match customTypeMappingsTableMaybe with
-            | Some tbl ->
-                tbl
-                |> Seq.map (fun kvp ->
-                    match kvp.Value with
-                    | :? string as s -> kvp.Key, s
-                    | v -> failwithf "custom_type_mappings: value for key '%s' must be a string (got %s)" kvp.Key (v.GetType().Name))
-                |> Map.ofSeq
-            | None -> Map.empty
     }
 
 /// Saves a Config to .toml file.
@@ -116,16 +113,16 @@ let save(cfg: Config) =
         readers.Items.Add("reader_type", readersConfig.ReaderType)
         doc.Tables.Add(readers))
 
+    if cfg.TypeMappingExtensions <> [] then
+        let extensions = TableSyntax("extensions")
+        extensions.Items.Add("type_mappings", cfg.TypeMappingExtensions |> List.toArray)
+        doc.Tables.Add(extensions)
+
     let filters = TableSyntax("filters")
     filters.Items.Add("include", cfg.Filters.Includes |> List.toArray)
     filters.Items.Add("exclude", cfg.Filters.Excludes |> List.toArray)
 
     doc.Tables.Add(filters)
-
-    if not cfg.CustomTypeMappings.IsEmpty then
-        let customMappings = TableSyntax("custom_type_mappings")
-        cfg.CustomTypeMappings |> Map.iter (fun k v -> customMappings.Items.Add(k, v))
-        doc.Tables.Add(customMappings)
-
+    
     let toml = doc.ToString()
     toml

@@ -1,11 +1,11 @@
-﻿module SqlHydra.MySql.MySqlSchemaProvider
+module SqlHydra.MySql.MySqlSchemaProvider
 
 open System.Data
 open MySql.Data
 open SqlHydra.Domain
 open SqlHydra
 
-let getSchema (cfg: Config, isLegacy: bool) : Schema =
+let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
     use conn = new MySqlClient.MySqlConnection(cfg.ConnectionString)
     conn.Open()
 
@@ -25,7 +25,7 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
             JOIN information_schema.key_column_usage AS kcu
                 ON tc.constraint_name = kcu.constraint_name
                 AND tc.table_schema = kcu.table_schema
-            WHERE 
+            WHERE
                 tc.constraint_type = 'PRIMARY KEY';
             """
 
@@ -43,84 +43,97 @@ let getSchema (cfg: Config, isLegacy: bool) : Schema =
         sColumns.Rows
         |> Seq.cast<DataRow>
         |> Seq.map (fun col ->
-            {|
-                TableCatalog = col["TABLE_CATALOG"] :?> string
-                TableSchema = col["TABLE_SCHEMA"] :?> string
-                TableName = col["TABLE_NAME"] :?> string
-                ColumnName = col["COLUMN_NAME"] :?> string
-                ProviderTypeName = col["DATA_TYPE"] :?> string
-                OrdinalPosition = col["ORDINAL_POSITION"] :?> uint64
-                IsNullable =
+            let schema = col["TABLE_SCHEMA"] :?> string
+            let table = col["TABLE_NAME"] :?> string
+            let name = col["COLUMN_NAME"] :?> string
+            {
+                ColumnSchema.Catalog = col["TABLE_CATALOG"] :?> string
+                ColumnSchema.Schema = schema
+                ColumnSchema.Table = table
+                ColumnSchema.Name = name
+                ColumnSchema.ProviderTypeName = col["DATA_TYPE"] :?> string
+                ColumnSchema.Ordinal = col["ORDINAL_POSITION"] :?> uint64 |> int
+                ColumnSchema.IsNullable =
                     match col["IS_NULLABLE"] :?> string with
                     | "YES" -> true
                     | _ -> false
-                IsPK =
-                    match col["COLUMN_KEY"] :?> string with
-                    | "PRI" -> true
-                    | _ -> false
-            |}
+                ColumnSchema.Precision = None
+                ColumnSchema.Scale = None
+                ColumnSchema.IsPrimaryKey = pks.Contains(schema, table, name)
+                ColumnSchema.IsComputed = false
+                ColumnSchema.DefaultValue = None
+            }
         )
-        |> Seq.sortBy (fun column -> column.OrdinalPosition)
+        |> Seq.sortBy (fun col -> col.Ordinal)
+        |> Seq.toList
 
-    let tables =
+    let columnsByTable =
+        allColumns
+        |> List.groupBy (fun col -> col.Catalog, col.Schema, col.Table)
+        |> Map.ofList
+
+    let tableSchemas =
         sTables.Rows
         |> Seq.cast<DataRow>
+        |> Seq.filter (fun tbl -> tbl["TABLE_TYPE"] :?> string <> "SYSTEM_TABLE")
         |> Seq.map (fun tbl ->
-            {|
-                Catalog = tbl["TABLE_CATALOG"] :?> string
-                Schema = tbl["TABLE_SCHEMA"] :?> string
-                Name  = tbl["TABLE_NAME"] :?> string
-                Type = tbl["TABLE_TYPE"] :?> string
-            |}
+            let catalog = tbl["TABLE_CATALOG"] :?> string
+            let schema = tbl["TABLE_SCHEMA"] :?> string
+            let name = tbl["TABLE_NAME"] :?> string
+            let tableType = tbl["TABLE_TYPE"] :?> string
+            {
+                TableSchema.Catalog = catalog
+                TableSchema.Schema = schema
+                TableSchema.Name = name
+                TableSchema.Type = if tableType = "table" then TableType.Table else TableType.View
+                TableSchema.Columns =
+                    columnsByTable
+                    |> Map.tryFind (catalog, schema, name)
+                    |> Option.defaultValue []
+            }
         )
-        |> Seq.filter (fun tbl -> tbl.Type <> "SYSTEM_TABLE")
         |> SchemaFilters.filterTables cfg.Filters
-        |> Seq.choose (fun tbl ->
-            let tableColumns =
-                allColumns
-                |> Seq.filter (fun col ->
-                    col.TableCatalog = tbl.Catalog &&
-                    col.TableSchema = tbl.Schema &&
-                    col.TableName = tbl.Name
-                )
+        |> Seq.toList
 
+    let tryFindTypeMapping =
+        let baseTryFind = MySqlDataTypes.tryFindTypeMapping isLegacy
+        extensions |> List.fold (fun acc (ext: IExtendTypeMapping) -> ext.Extend(acc)) baseTryFind
+
+    let tables =
+        tableSchemas
+        |> List.choose (fun tableSchema ->
             let supportedColumns =
-                let builtInTryFindTypeMapping = MySqlDataTypes.tryFindTypeMapping isLegacy
-                let tryFindTypeMapping (typeName: string) =
-                    CustomTypeMappingHelper.tryFind cfg.CustomTypeMappings typeName
-                    |> Option.orElseWith (fun () -> builtInTryFindTypeMapping typeName)
-                tableColumns
-                |> Seq.choose (fun col ->
-                    tryFindTypeMapping col.ProviderTypeName
-                    |> Option.map (fun typeMapping -> 
-                        { 
-                            Column.Name = col.ColumnName
+                tableSchema.Columns
+                |> List.choose (fun col ->
+                    let ctx = { TypeMappingContext.Table = tableSchema; TypeMappingContext.Column = col }
+                    tryFindTypeMapping ctx
+                    |> Option.map (fun typeMapping ->
+                        {
+                            Column.Name = col.Name
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
-                            Column.IsPK = pks.Contains(col.TableSchema, col.TableName, col.ColumnName)
+                            Column.IsPK = col.IsPrimaryKey
                         }
                     )
                 )
-                |> Seq.toList
 
             let filteredColumns =
                 supportedColumns
-                |> SchemaFilters.filterColumns cfg.Filters tbl.Schema tbl.Name
+                |> SchemaFilters.filterColumns cfg.Filters tableSchema.Schema tableSchema.Name
                 |> Seq.toList
 
             if filteredColumns |> Seq.isEmpty then
                 None
             else
                 Some {
-                    Table.Catalog = tbl.Catalog
-                    Table.Schema = tbl.Schema
-                    Table.Name =  tbl.Name
-                    Table.Type = if tbl.Type = "table" then TableType.Table else TableType.View
+                    Table.Catalog = tableSchema.Catalog
+                    Table.Schema = tableSchema.Schema
+                    Table.Name = tableSchema.Name
+                    Table.Type = tableSchema.Type
                     Table.Columns = filteredColumns
-                    Table.TotalColumns = tableColumns |> Seq.length
+                    Table.TotalColumns = tableSchema.Columns |> List.length
                 }
         )
-        |> Seq.toList
 
     {
         Tables = tables

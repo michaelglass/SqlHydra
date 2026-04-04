@@ -715,6 +715,72 @@ If you get SSL certificate errors, append `;TrustServerCertificate=True` to your
 </details>
 
 <details>
+<summary><h2>Extensibility</h2></summary>
+
+SqlHydra supports type mapping extensions via the `IExtendTypeMapping` interface in `SqlHydra.Domain`. This lets you add custom database-to-CLR type mappings that SqlHydra doesn't handle out of the box.
+
+### How It Works
+
+When `SqlHydra.Cli` runs, it automatically scans your target project's build output for types implementing `IExtendTypeMapping`. Your extension wraps the built-in type mapping function, giving you a chance to handle custom types before falling back to the default behavior.
+
+### Implementing an Extension in Your Project
+
+Add a class implementing `IExtendTypeMapping` anywhere in your project:
+
+```fsharp
+open SqlHydra.Domain
+
+type MyCustomMapping() =
+    interface IExtendTypeMapping with
+        member _.Extend(baseTryFind) =
+            fun (ctx: TypeMappingContext) ->
+                match ctx.Column.ProviderTypeName.ToLower() with
+                | "vector" ->
+                    Some {
+                        TypeMapping.ColumnTypeAlias = "vector"
+                        TypeMapping.ClrType = "Pgvector.Vector"
+                        TypeMapping.DbType = System.Data.DbType.Object
+                        TypeMapping.ProviderDbType = Some "Vector"
+                    }
+                | _ -> baseTryFind ctx
+```
+
+That's it -- no configuration needed. The next time you run `dotnet sqlhydra`, your extension will be discovered automatically from your project's build output.
+
+> **Note:** Make sure your project is built before running `sqlhydra` so the extension can be discovered.
+
+### The TypeMappingContext
+
+Your extension receives a `TypeMappingContext` with full schema metadata for the column being mapped:
+
+```fsharp
+type TypeMappingContext =
+    {
+        Table: TableSchema   // Table catalog, schema, name, type, and all columns
+        Column: ColumnSchema  // Column name, type, nullability, precision, scale, etc.
+    }
+```
+
+This lets you make mapping decisions based on the table name, column name, schema, or any other metadata -- not just the provider type name.
+
+### Creating a NuGet Extension Package
+
+If a type mapping extension is published as a NuGet package (e.g. `SqlHydra.Query.PgVector`), add it as a `PackageReference` in your project and then register it in your TOML configuration:
+
+```toml
+[extensions]
+type_mappings = ["SqlHydra.Query.PgVector"]
+```
+
+SqlHydra will resolve the assembly from your project's build output and load any `IExtendTypeMapping` implementations it finds.
+
+### Multiple Extensions
+
+Multiple extensions compose in order -- each wraps the previous one. An extension should call `baseTryFind ctx` for any types it doesn't handle, allowing the next extension (or the built-in mappings) to take over.
+
+</details>
+
+<details>
 <summary><h2>Supported Frameworks</h2></summary>
 
 - .NET 8, .NET 9, and .NET 10 are supported
