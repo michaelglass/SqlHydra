@@ -6,6 +6,7 @@ open System.Threading
 open SqlHydra.Domain
 
 /// Indicates which execution strategy to use after command preparation.
+[<NoComparison>]
 type private InsertExecMode =
     | ExecNonQuery
     | ExecScalar

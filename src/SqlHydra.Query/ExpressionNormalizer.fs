@@ -71,6 +71,7 @@ let normalize (expr: Expression) : Expression =
 // Structural noise (Lambda, Block, Invoke) is eliminated during conversion.
 // Original LINQ types are retained in variants for semantic pattern matching.
 
+[<NoComparison>]
 type NormalizedExpression =
     | NBinary of left: NormalizedExpression * op: ExpressionType * right: NormalizedExpression
     | NUnary of op: ExpressionType * operand: NormalizedExpression

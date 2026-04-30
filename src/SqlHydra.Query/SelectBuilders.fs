@@ -10,6 +10,7 @@ open System.Threading.Tasks
 
 /// The context type that determines how the query context is created and disposed.
 /// Can be implicitly converted from a QueryContext, a function that creates a QueryContext, a Task that creates a QueryContext, or an Async that creates a QueryContext.
+[<NoComparison; NoEquality>]
 type ContextType =
     /// A new QueryContext will be created and disposed within the select builder.
     | Create of create: (unit -> QueryContext)
