@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;net8.0;net9.0;net10.0</TargetFrameworks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Version>4.0.0-beta.3</Version>
+    <Description>pgvector distance functions for SqlHydra.Query — cosine, L2, and inner product distance operators.</Description>
+    <Authors>Jordan Marr</Authors>
+    <PackageTags>F# fsharp sql pgvector vector similarity</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="PgvectorExtensions.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SqlHydra.Query\SqlHydra.Query.fsproj" />
+    <ProjectReference Include="..\SqlHydra.Domain\SqlHydra.Domain.fsproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="FSharp.Core" Version="6.0.7" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
+    <PackageReference Update="FSharp.Core" Version="8.0.100" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Update="FSharp.Core" Version="9.0.201" Condition="'$(TargetFramework)' == 'net9.0'" />
+    <PackageReference Update="FSharp.Core" Version="10.1.201" Condition="'$(TargetFramework)' == 'net10.0'" />
+  </ItemGroup>
+</Project>

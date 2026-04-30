@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.2.11408.102 d18.0
+VisualStudioVersion = 18.2.11408.102
 MinimumVisualStudioVersion = 15.0.26124.0
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "_Tests", "_Tests", "{D0FB7EBA-9703-4DDC-BCCB-4032990BC9BC}"
 EndProject
@@ -14,6 +14,8 @@ EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "SqlHydra.Domain", "SqlHydra.Domain\SqlHydra.Domain.fsproj", "{958CEE47-CC2A-4CA2-BFE3-53653CB39604}"
 EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "SqlHydra.Cli", "SqlHydra.Cli\SqlHydra.Cli.fsproj", "{B02EE3C1-67FB-406A-BA07-C3039AC52F27}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "SqlHydra.Query.Pgvector", "SqlHydra.Query.Pgvector\SqlHydra.Query.Pgvector.fsproj", "{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -118,6 +120,24 @@ Global
 		{B02EE3C1-67FB-406A-BA07-C3039AC52F27}.Release|x64.Build.0 = Release|Any CPU
 		{B02EE3C1-67FB-406A-BA07-C3039AC52F27}.Release|x86.ActiveCfg = Release|Any CPU
 		{B02EE3C1-67FB-406A-BA07-C3039AC52F27}.Release|x86.Build.0 = Release|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Debug|x64.Build.0 = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Debug|x86.Build.0 = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.DebugDocker|Any CPU.ActiveCfg = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.DebugDocker|Any CPU.Build.0 = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.DebugDocker|x64.ActiveCfg = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.DebugDocker|x64.Build.0 = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.DebugDocker|x86.ActiveCfg = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.DebugDocker|x86.Build.0 = Debug|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Release|x64.ActiveCfg = Release|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Release|x64.Build.0 = Release|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Release|x86.ActiveCfg = Release|Any CPU
+		{E69EDADF-2FCE-41E3-B6FE-50EB3EDF75A7}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
