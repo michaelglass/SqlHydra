@@ -1099,6 +1099,9 @@ let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'P
 type OrderBy =
     | OrderByColumn of tableAlias: string * MemberInfo
     | OrderByAggregateColumn of aggregateType: string * tableAlias: string * MemberInfo
+    /// `orderBy (cosine_distance(col, vec))` and similar method-call expressions.
+    /// Carries the rendered SQL fragment with `?` placeholders bound to `parameters`.
+    | OrderByExpression of fragment: string * parameters: obj[]
     | OrderByIgnored
 
 /// Returns a column MemberInfo.
@@ -1119,6 +1122,40 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
         | NAggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             OrderByAggregateColumn (aggType, alias, p.Member)
+        // Method-call orderBy (e.g. orderBy (cosine_distance(col, vec))) — render via visitSqlFn.
+        // Compile-and-eval inlineValue args so vector literals become bound parameters; columns
+        // are qualified normally; infix-operator registrations apply.
+        | NMethodCall(m, _) ->
+            let parms = ResizeArray<obj>()
+            // Walk inlineValue args and replace with `?` placeholders threaded into parms.
+            // We do this via a custom qualifyColumn that captures inlineValue substitution
+            // is done by visitSqlFn itself (inlineValue arm renders as literal). For ordering
+            // by `cosine_distance(col, inlineValue v)` we need v to be bound, not inlined.
+            let rec preprocess (e: Expression) : Expression =
+                match e with
+                | :? MethodCallExpression as mc when mc.Method.Name = nameof inlineValue && mc.Arguments.Count = 1 ->
+                    // Compile-and-eval and replace with a constant marked for parameter binding.
+                    let value = compileAndEval mc.Arguments.[0]
+                    parms.Add(if isNull value then box System.DBNull.Value else value)
+                    // Use a unique placeholder string; visitSqlFn's renderExpr will treat as Constant
+                    System.Linq.Expressions.Expression.Constant("?", typeof<string>) :> Expression
+                | _ -> e
+            // Recurse into method-call args, replacing inlineValue subtrees.
+            let rec rebuild (e: Expression) : Expression =
+                match e with
+                | :? MethodCallExpression as mc when mc.Method.Name = nameof inlineValue && mc.Arguments.Count = 1 ->
+                    preprocess e
+                | :? MethodCallExpression as mc ->
+                    let newArgs = mc.Arguments |> Seq.map rebuild |> Array.ofSeq
+                    System.Linq.Expressions.Expression.Call(mc.Object, mc.Method, newArgs) :> Expression
+                | _ -> e
+            let rebuilt = rebuild (m :> Expression)
+            let qualifyColumn alias (mem: MemberInfo) = $"\"{alias}\".\"{mem.Name}\""
+            let frag = visitSqlFn qualifyColumn rebuilt
+            // Substitute the literal `'?'` strings emitted by Constant renderer back to bare `?` placeholders.
+            // (Constant string renders as `'?'` due to renderExpr's string handling; we want bare `?`.)
+            let cleanFrag = frag.Replace("'?'", "?")
+            OrderByExpression (cleanFrag, parms.ToArray())
         | NMemberAccess(inner, m) ->
             if m.Member.DeclaringType |> isOptionOrNullableType then
                 visit inner
