@@ -349,7 +349,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let innerTableNameAsAlias =
             innerProperties
             |> Seq.map (fun p -> p, mergedTables[TableAliasKey p.Alias])
-            |> Seq.map (fun (p, tbl) -> $"%s{tbl.Schema}.%s{tbl.Name} AS %s{p.Alias}")
+            |> Seq.map (fun (p, tbl) ->
+                if tbl.Schema = "" then $"%s{tbl.Name} AS %s{p.Alias}"
+                else $"%s{tbl.Schema}.%s{tbl.Name} AS %s{p.Alias}")
             |> Seq.head
 
         let joinCondition =
@@ -396,7 +398,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let innerTableNameAsAlias =
             innerProperties
             |> Seq.map (fun p -> p, mergedTables[TableAliasKey p.Alias])
-            |> Seq.map (fun (p, tbl) -> $"%s{tbl.Schema}.%s{tbl.Name} AS %s{p.Alias}")
+            |> Seq.map (fun (p, tbl) ->
+                if tbl.Schema = "" then $"%s{tbl.Name} AS %s{p.Alias}"
+                else $"%s{tbl.Schema}.%s{tbl.Name} AS %s{p.Alias}")
             |> Seq.head
 
         let joinCondition =
@@ -453,7 +457,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         // Get inner table info
         let innerTable = mergedTables[TableAliasKey innerAlias]
-        let tableName = $"{innerTable.Schema}.{innerTable.Name}"
+        let tableName =
+            if innerTable.Schema = "" then innerTable.Name
+            else $"{innerTable.Schema}.{innerTable.Name}"
 
         let pendingJoin = {
             JoinType = JoinType.Inner
@@ -484,7 +490,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         // Get inner table info
         let innerTable = mergedTables[TableAliasKey innerAlias]
-        let tableName = $"{innerTable.Schema}.{innerTable.Name}"
+        let tableName =
+            if innerTable.Schema = "" then innerTable.Name
+            else $"{innerTable.Schema}.{innerTable.Name}"
 
         let pendingJoin = {
             JoinType = JoinType.Left
