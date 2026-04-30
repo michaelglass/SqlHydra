@@ -536,11 +536,19 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
             renderExpr u.Operand
         // inlineValue marker: compile-and-eval the inner expression and emit as a literal.
         | MethodCall m when m.Method.Name = nameof inlineValue && m.Arguments.Count = 1 ->
+            let inv = System.Globalization.CultureInfo.InvariantCulture
             match compileAndEval m.Arguments.[0] with
             | null -> "NULL"
             | :? string as s -> $"'{s}'"
             | :? bool as b -> if b then "TRUE" else "FALSE"
-            | v -> sprintf "%O" v
+            | :? System.DateTime as dt ->
+                let s = dt.ToString("yyyy-MM-dd HH:mm:ss", inv)
+                $"'{s}'"
+            | :? System.DateTimeOffset as dto ->
+                let s = dto.ToString("yyyy-MM-dd HH:mm:sszzz", inv)
+                $"'{s}'"
+            | :? System.Guid as g -> $"'{g}'"
+            | v -> formatNumericLiteral v (v.GetType())
         | Member mem when mem.Expression <> null ->
             let alias = visitAlias mem.Expression
             qualifyColumn alias mem.Member
@@ -1571,8 +1579,13 @@ let private renderSelectExpression (exp: Expression) : string * obj[] =
             let aggType = mc.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             renderAggregate aggType (render mc.Arguments.[0])
         | :? MethodCallExpression as mc ->
-            let args = mc.Arguments |> Seq.map render |> String.concat ", "
-            $"{mc.Method.Name}({args})"
+            // Delegate to visitSqlFn for caseWhen/castAs/coalesce/etc. — it already
+            // knows how to render F# query DSL methods to SQL. Fall back to a generic
+            // "name(args)" form only if visitSqlFn rejects the shape.
+            try visitSqlFn qualifyColumn (mc :> Expression)
+            with _ ->
+                let args = mc.Arguments |> Seq.map render |> String.concat ", "
+                $"{mc.Method.Name}({args})"
         | _ ->
             notImplMsg $"Unsupported expression in select projection: {e.NodeType}"
     let frag = render exp
