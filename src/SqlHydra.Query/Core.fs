@@ -43,6 +43,11 @@ module FQ =
         let tbl = tables[TableAliasKey tableAlias]
         $"%s{tbl.Schema}.%s{tbl.Name}.%s{column.Name}"
 
+    /// Renders a table as `schema.name` or just `name` when schema is empty (CTE refs).
+    let qualifiedTable (tbl: TableMapping) =
+        if tbl.Schema = "" then tbl.Name
+        else $"%s{tbl.Schema}.%s{tbl.Name}"
+
 /// Represents a collection that must contain at least on item.
 module AtLeastOne =
     [<NoComparison>]

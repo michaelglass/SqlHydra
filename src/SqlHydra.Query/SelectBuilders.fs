@@ -121,11 +121,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         match tblMaybe with
         | Some tbl ->
-            // Schema = "" means this is a CTE reference (no schema prefix).
-            let fromSpec =
-                if tbl.Schema = ""
-                then $"{tbl.Name} as {tableAlias}"
-                else $"{tbl.Schema}.{tbl.Name} as {tableAlias}"
+            let fromSpec = $"{FQ.qualifiedTable tbl} as {tableAlias}"
             QuerySource<'T, SelectQueryIR>({ ir with From = Some fromSpec }, tableMappings)
         | None ->
             // Handles this scenario: `select (p.FirstName, p.LastName) into (fname, lname)`
@@ -349,9 +345,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let innerTableNameAsAlias =
             innerProperties
             |> Seq.map (fun p -> p, mergedTables[TableAliasKey p.Alias])
-            |> Seq.map (fun (p, tbl) ->
-                if tbl.Schema = "" then $"%s{tbl.Name} AS %s{p.Alias}"
-                else $"%s{tbl.Schema}.%s{tbl.Name} AS %s{p.Alias}")
+            |> Seq.map (fun (p, tbl) -> $"%s{FQ.qualifiedTable tbl} AS %s{p.Alias}")
             |> Seq.head
 
         let joinCondition =
@@ -398,9 +392,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let innerTableNameAsAlias =
             innerProperties
             |> Seq.map (fun p -> p, mergedTables[TableAliasKey p.Alias])
-            |> Seq.map (fun (p, tbl) ->
-                if tbl.Schema = "" then $"%s{tbl.Name} AS %s{p.Alias}"
-                else $"%s{tbl.Schema}.%s{tbl.Name} AS %s{p.Alias}")
+            |> Seq.map (fun (p, tbl) -> $"%s{FQ.qualifiedTable tbl} AS %s{p.Alias}")
             |> Seq.head
 
         let joinCondition =
@@ -457,9 +449,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         // Get inner table info
         let innerTable = mergedTables[TableAliasKey innerAlias]
-        let tableName =
-            if innerTable.Schema = "" then innerTable.Name
-            else $"{innerTable.Schema}.{innerTable.Name}"
+        let tableName = FQ.qualifiedTable innerTable
 
         let pendingJoin = {
             JoinType = JoinType.Inner
@@ -492,9 +482,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         // Get inner table info
         let innerTable = mergedTables[TableAliasKey innerAlias]
-        let tableName =
-            if innerTable.Schema = "" then innerTable.Name
-            else $"{innerTable.Schema}.{innerTable.Name}"
+        let tableName = FQ.qualifiedTable innerTable
 
         let pendingJoin = {
             JoinType = JoinType.Left
@@ -502,10 +490,10 @@ type SelectBuilder<'Selected, 'Mapped> () =
             TableAlias = innerAlias
         }
 
-        let ir = outerSource |> getQueryOrDefault
         // Propagate any WITH clauses from a `cteFrom` inner source onto the outer IR.
+        let outerIr = outerSource |> getQueryOrDefault
         let innerIr = innerSource |> getQueryOrDefault
-        let ir = { ir with WithCtes = ir.WithCtes @ innerIr.WithCtes }
+        let ir = { outerIr with WithCtes = outerIr.WithCtes @ innerIr.WithCtes }
         this.PendingJoinInfo <- Some pendingJoin
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
