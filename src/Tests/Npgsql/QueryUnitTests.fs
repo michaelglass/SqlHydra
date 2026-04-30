@@ -1098,3 +1098,23 @@ let ``Phase5: anonymous record same-name field skips AS`` () =
         }
         |> toSql
     sql.Contains("AS \"name\"") =! false
+
+// ─── Phase 6: lateral subquery WHERE with outer-scope column ───
+
+[<Test>]
+let ``Phase6: lateral subquery WHERE with col-to-col on correlated outer`` () =
+    let inner =
+        subquery {
+            for d in sales.salesorderdetail do
+                correlate o in sales.salesorderheader
+                where (d.salesorderid = o.salesorderid)
+                select (countBy d.salesorderdetailid)
+        }
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+                lateralJoin inner "lat"
+                select o.salesorderid
+        }
+        |> toSql
+    sql.Contains("\"o\".\"salesorderid\"") =! true
