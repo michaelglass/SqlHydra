@@ -302,9 +302,21 @@ module SqlPatterns =
         match exp with
         | MethodCall m when aggregateMethodNames.Contains m.Method.Name ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+            // First argument may be a direct Property `col` or an Option/Nullable Value chain
+            // like `opt.Value.col` (after a leftJoin'). Recurse through wrappers to find the
+            // underlying column property.
+            let rec unwrapToProperty (e: Expression) =
+                match e with
+                | Property (p, ext) -> Some (p, ext)
+                | Member m when m.Expression <> null -> unwrapToProperty m.Expression
+                | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert -> unwrapToProperty u.Operand
+                | _ -> None
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
-            | _ -> notImplMsg "Invalid argument to aggregate function."
+            | other ->
+                match unwrapToProperty other with
+                | Some p -> Some (aggType, p)
+                | None -> notImplMsg "Invalid argument to aggregate function."
         | _ -> None
 
 // ─── NormalizedExpression Patterns ───────────────────────────────────────────
@@ -1362,41 +1374,80 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
                     let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
                     Compare(fqCol, compOp, Parameter queryParameter)
 
-            // Column compared to a non-NValue expression (typically a captured local or static member).
-            // Compile-and-eval the RHS to obtain the runtime value.
+            // Column compared to a non-NValue expression. Could be either:
+            //   (a) a captured local / static member — compile-and-eval to a parameter, or
+            //   (b) a column reference whose receiver isn't in the local `tables` map (e.g. a
+            //       correlated outer-scope parameter from a lateral subquery).
+            // Try compile-and-eval first; if it fails (because the expression references a
+            // free query parameter), fall back to treating it as a column ref via the
+            // underlying member chain.
             | NColumn (p, _), (NMemberAccess _ | NMethodCall _ | NUnknown _) ->
-                let value =
+                let evalRhs () =
                     match right with
-                    | NMemberAccess(_, m) -> compileAndEvaluateExpression (m :> Expression)
-                    | NMethodCall(m, _) -> compileAndEvaluateExpression (m :> Expression)
-                    | NUnknown e -> compileAndEvaluateExpression e
-                    | _ -> notImplMsg "Unreachable"
+                    | NMemberAccess(_, m) -> Some (compileAndEvaluateExpression (m :> Expression))
+                    | NMethodCall(m, _) -> Some (compileAndEvaluateExpression (m :> Expression))
+                    | NUnknown e -> Some (compileAndEvaluateExpression e)
+                    | _ -> None
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
-                match value with
-                | null when op = ExpressionType.Equal -> IsNull(fqCol)
-                | null when op = ExpressionType.NotEqual -> IsNotNull(fqCol)
-                | _ ->
-                    let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
-                    Compare(fqCol, compOp, Parameter queryParameter)
+                let tryColumnRef () =
+                    match right with
+                    | NMemberAccess(_, m) when m.Expression <> null ->
+                        try
+                            let rhsAlias = visitAlias m.Expression
+                            Some (qualifyColumn rhsAlias m.Member)
+                        with _ -> None
+                    | _ -> None
+                let result =
+                    try evalRhs () |> Option.map Choice1Of2
+                    with _ -> tryColumnRef () |> Option.map Choice2Of2
+                match result with
+                | Some (Choice1Of2 value) ->
+                    match value with
+                    | null when op = ExpressionType.Equal -> IsNull(fqCol)
+                    | null when op = ExpressionType.NotEqual -> IsNotNull(fqCol)
+                    | _ ->
+                        let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
+                        Compare(fqCol, compOp, Parameter queryParameter)
+                | Some (Choice2Of2 rhsCol) ->
+                    CompareColumns(fqCol, compOp, rhsCol)
+                | None ->
+                    notImplMsg $"Unable to render join predicate RHS: {right}"
 
-            // Reverse: captured value compared to column.
+            // Reverse: captured value or outer-scope column compared to local column.
             | (NMemberAccess _ | NMethodCall _ | NUnknown _), NColumn (p, _) ->
-                let value =
+                let evalLhs () =
                     match left with
-                    | NMemberAccess(_, m) -> compileAndEvaluateExpression (m :> Expression)
-                    | NMethodCall(m, _) -> compileAndEvaluateExpression (m :> Expression)
-                    | NUnknown e -> compileAndEvaluateExpression e
-                    | _ -> notImplMsg "Unreachable"
+                    | NMemberAccess(_, m) -> Some (compileAndEvaluateExpression (m :> Expression))
+                    | NMethodCall(m, _) -> Some (compileAndEvaluateExpression (m :> Expression))
+                    | NUnknown e -> Some (compileAndEvaluateExpression e)
+                    | _ -> None
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
+                let tryColumnRef () =
+                    match left with
+                    | NMemberAccess(_, m) when m.Expression <> null ->
+                        try
+                            let lhsAlias = visitAlias m.Expression
+                            Some (qualifyColumn lhsAlias m.Member)
+                        with _ -> None
+                    | _ -> None
+                let result =
+                    try evalLhs () |> Option.map Choice1Of2
+                    with _ -> tryColumnRef () |> Option.map Choice2Of2
                 let reversedOp = reverseComparisonOp compOp
-                match value with
-                | null when reversedOp = Eq -> IsNull(fqCol)
-                | null when reversedOp = NotEq -> IsNotNull(fqCol)
-                | _ ->
-                    let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
-                    Compare(fqCol, reversedOp, Parameter queryParameter)
+                match result with
+                | Some (Choice1Of2 value) ->
+                    match value with
+                    | null when reversedOp = Eq -> IsNull(fqCol)
+                    | null when reversedOp = NotEq -> IsNotNull(fqCol)
+                    | _ ->
+                        let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
+                        Compare(fqCol, reversedOp, Parameter queryParameter)
+                | Some (Choice2Of2 lhsCol) ->
+                    CompareColumns(lhsCol, compOp, fqCol)
+                | None ->
+                    notImplMsg $"Unable to render join predicate LHS: {left}"
 
             | _ ->
                 notImplMsg $"Unsupported join predicate comparison: {op}"
