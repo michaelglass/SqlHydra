@@ -116,6 +116,26 @@ module CastFunctions =
     /// float/double → FLOAT, int → INTEGER, int64 → BIGINT, decimal → NUMERIC, string → TEXT, bool → BOOLEAN.
     let castAs<'Result> (value: 'T) : 'Result = Unchecked.defaultof<'Result>
 
+[<AutoOpen>]
+module CaseWhenFunctions =
+    /// CASE WHEN condition THEN thenValue ELSE elseValue END.
+    /// Note: values are rendered as SQL literals, not parameters.
+    /// Column references are properly qualified. Do not pass unsanitized user input.
+    let caseWhen<'T> (condition: bool) (thenValue: 'T) (elseValue: 'T) : 'T = Unchecked.defaultof<'T>
+
+    /// Multi-branch CASE WHEN expression.
+    /// CASE WHEN cond1 THEN val1 WHEN cond2 THEN val2 ... ELSE elseVal END.
+    let caseWhenMulti<'T> (branches: (bool * 'T) list) (elseValue: 'T) : 'T = Unchecked.defaultof<'T>
+
+[<AutoOpen>]
+module RawExpressions =
+    /// Reference a column from a lateral subquery by alias and column name (raw quoted).
+    /// Example: lateralCol "lat" "score" → "lat"."score"
+    let lateralCol<'T> (alias: string) (column: string) : 'T = Unchecked.defaultof<'T>
+
+    /// Inject a raw SQL expression into a select projection. Use sparingly.
+    let rawExpr<'T> (sql: string) : 'T = Unchecked.defaultof<'T>
+
 /// Registry for SQL functions that should be emitted as infix operators.
 /// Register a function name to emit `left OP right` instead of `fn(left, right)`.
 /// Used by extension packages (e.g. pgvector) to expose custom infix operators.

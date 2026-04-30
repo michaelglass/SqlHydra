@@ -65,6 +65,12 @@ type SqlFn =
     static member make_date(year: int, month: int, day: int) : DateTime = sqlFn
     static member make_time(hour: int, minute: int, second: float) : TimeSpan = sqlFn
 
+/// PostgreSQL-specific functions.
+type PgSqlFn =
+    /// Renders a PostgreSQL `INTERVAL '<value>'` literal.
+    /// Example: `interval "7 days"` → `INTERVAL '7 days'`
+    static member interval(value: string) : TimeSpan = sqlFn
+
 type InsertBuilder<'Inserted, 'InsertReturn> with
     
     /// Performs an update on one or more update fields if a conflict occurs.

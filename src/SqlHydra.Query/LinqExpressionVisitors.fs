@@ -499,12 +499,124 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         | _ ->
             notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
 
+    let compileAndEval (e: Expression) =
+        System.Linq.Expressions.Expression.Lambda(e).Compile().DynamicInvoke()
+
+    /// Render an arbitrary expression as a SQL fragment (literals inline, columns qualified, nested fns recursed).
+    /// Supports: Member columns, static-field Members, Constants, Unary Convert, Binary arithmetic/compare, MethodCall.
+    let rec renderExpr (arg: Expression) : string =
+        match arg with
+        | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
+            renderExpr u.Operand
+        | Member mem when mem.Expression <> null ->
+            let alias = visitAlias mem.Expression
+            qualifyColumn alias mem.Member
+        | Member mem ->
+            let value = compileAndEval mem
+            match value with
+            | null -> "NULL"
+            | :? string as s -> $"'{s}'"
+            | v -> sprintf "%O" v
+        | Constant c when c.Value = null -> "NULL"
+        | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
+        | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
+        | Constant c -> sprintf "%O" c.Value
+        | :? BinaryExpression as b ->
+            let left = renderExpr b.Left
+            let right = renderExpr b.Right
+            let op =
+                match b.NodeType with
+                | ExpressionType.Equal -> "="
+                | ExpressionType.NotEqual -> "<>"
+                | ExpressionType.GreaterThan -> ">"
+                | ExpressionType.GreaterThanOrEqual -> ">="
+                | ExpressionType.LessThan -> "<"
+                | ExpressionType.LessThanOrEqual -> "<="
+                | ExpressionType.AndAlso -> "AND"
+                | ExpressionType.OrElse -> "OR"
+                | ExpressionType.Add -> "+"
+                | ExpressionType.Subtract -> "-"
+                | ExpressionType.Multiply -> "*"
+                | ExpressionType.Divide -> "/"
+                | ExpressionType.Modulo -> "%"
+                | _ -> notImplMsg $"Unsupported binary operator in expression: {b.NodeType}"
+            $"{left} {op} {right}"
+        | MethodCall _ as nested -> visitSqlFn qualifyColumn nested
+        | _ -> notImplMsg $"Unsupported expression in caseWhen/select fragment: {arg.NodeType}"
+
+    /// Extract (cond, value) pairs from an F# list literal like `[ a > 1, "x"; b > 2, "y" ]`.
+    let rec extractListItems (exp: Expression) : (string * string) list =
+        match exp with
+        | :? MethodCallExpression as m when m.Method.Name = "Cons" || m.Method.Name = "op_ColonColon" ->
+            let (cond, value) = extractTuple m.Arguments.[0]
+            (cond, value) :: extractListItems m.Arguments.[1]
+        | :? NewExpression as n when n.Arguments.Count = 2 ->
+            let (cond, value) = extractTuple n.Arguments.[0]
+            (cond, value) :: extractListItems n.Arguments.[1]
+        | :? MemberExpression as m when m.Member.Name = "Empty" -> []
+        | :? DefaultExpression -> []
+        | _ ->
+            // Fallback: compile-and-eval to runtime list.
+            try
+                let value = compileAndEval exp
+                match value with
+                | :? System.Collections.IEnumerable as items ->
+                    [ for item in items do
+                        let t = item.GetType()
+                        let condProp = t.GetProperty("Item1")
+                        let valProp = t.GetProperty("Item2")
+                        let cond = condProp.GetValue(item) :?> bool
+                        let v = valProp.GetValue(item)
+                        let condStr = if cond then "TRUE" else "FALSE"
+                        let valStr =
+                            match v with
+                            | null -> "NULL"
+                            | :? string as s -> $"'{s}'"
+                            | x -> sprintf "%O" x
+                        yield (condStr, valStr) ]
+                | _ -> notImplMsg $"Cannot extract caseWhenMulti list: {exp.NodeType}"
+            with ex -> notImplMsg $"Cannot extract caseWhenMulti list: {exp.NodeType} ({ex.Message})"
+    and extractTuple (exp: Expression) : string * string =
+        match exp with
+        | :? NewExpression as n when n.Arguments.Count = 2 ->
+            (renderExpr n.Arguments.[0], renderExpr n.Arguments.[1])
+        | :? MethodCallExpression as m when m.Method.Name = "NewTuple" ->
+            (renderExpr m.Arguments.[0], renderExpr m.Arguments.[1])
+        | _ -> notImplMsg $"Cannot extract caseWhenMulti tuple: {exp.NodeType}"
+
     match exp with
     // CAST(expr AS sqlType) — target SQL type inferred from the F# return type.
     | MethodCall m when m.Method.Name = "castAs" && m.Arguments.Count = 1 ->
-        let inner = renderArg m.Arguments.[0]
+        let inner = renderExpr m.Arguments.[0]
         let sqlType = sqlTypeForClrType m.Method.ReturnType
         $"CAST({inner} AS {sqlType})"
+    // CASE WHEN cond THEN then ELSE else END
+    | MethodCall m when m.Method.Name = "caseWhen" && m.Arguments.Count = 3 ->
+        let cond = renderExpr m.Arguments.[0]
+        let thenV = renderExpr m.Arguments.[1]
+        let elseV = renderExpr m.Arguments.[2]
+        $"CASE WHEN {cond} THEN {thenV} ELSE {elseV} END"
+    // Multi-branch CASE WHEN
+    | MethodCall m when m.Method.Name = "caseWhenMulti" && m.Arguments.Count = 2 ->
+        let branches = extractListItems m.Arguments.[0]
+        let elseV = renderExpr m.Arguments.[1]
+        let whens =
+            branches
+            |> List.map (fun (c, v) -> $"WHEN {c} THEN {v}")
+            |> String.concat " "
+        $"CASE {whens} ELSE {elseV} END"
+    // Lateral subquery column reference: lateralCol "alias" "col" → "alias"."col"
+    | MethodCall m when m.Method.Name = "lateralCol" && m.Arguments.Count = 2 ->
+        let alias = compileAndEval m.Arguments.[0] :?> string
+        let column = compileAndEval m.Arguments.[1] :?> string
+        $"\"{alias}\".\"{column}\""
+    // Raw SQL escape hatch
+    | MethodCall m when m.Method.Name = "rawExpr" && m.Arguments.Count = 1 ->
+        compileAndEval m.Arguments.[0] :?> string
+    // PostgreSQL INTERVAL literal: interval "7 days" → INTERVAL '7 days'
+    | MethodCall m when m.Method.Name = "interval" && m.Arguments.Count = 1 ->
+        let value = compileAndEval m.Arguments.[0] :?> string
+        $"INTERVAL '{value}'"
     // Aggregates → render via renderAggregate (handles COUNT(DISTINCT col)).
     | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
         let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
@@ -512,7 +624,9 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         | Member mem when mem.Expression <> null ->
             let alias = visitAlias mem.Expression
             renderAggregate aggType (qualifyColumn alias mem.Member)
-        | _ -> notImplMsg "Unsupported aggregate argument"
+        | inner ->
+            // Nested expression inside aggregate (e.g. SUM(CAST(...)) or MAX(SUM(...)))
+            renderAggregate aggType (renderExpr inner)
     // 2-arg method calls registered as infix operators (e.g. pgvector cosine_distance → <=>).
     | MethodCall m when m.Arguments.Count = 2 && (InfixOperators.tryGetOperator m.Method.Name).IsSome ->
         let op = (InfixOperators.tryGetOperator m.Method.Name).Value
