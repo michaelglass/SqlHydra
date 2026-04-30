@@ -633,7 +633,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
     | MethodCall m ->
         match (if m.Arguments.Count = 2 then InfixOperators.tryGetOperator m.Method.Name else None) with
         | Some op ->
-            $"{renderExpr m.Arguments.[0]} {op} {renderExpr m.Arguments.[1]}"
+            $"({renderExpr m.Arguments.[0]} {op} {renderExpr m.Arguments.[1]})"
         | None ->
             let args = m.Arguments |> Seq.map renderExpr |> String.concat ", "
             $"{m.Method.Name}({args})"
@@ -1161,7 +1161,7 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
                 | :? ConstantExpression as c -> formatNumericLiteral c.Value c.Type
                 | :? MethodCallExpression as mc when mc.Arguments.Count = 2 && (InfixOperators.tryGetOperator mc.Method.Name).IsSome ->
                     let op = (InfixOperators.tryGetOperator mc.Method.Name).Value
-                    $"{render mc.Arguments.[0]} {op} {render mc.Arguments.[1]}"
+                    $"({render mc.Arguments.[0]} {op} {render mc.Arguments.[1]})"
                 | :? MethodCallExpression as mc ->
                     let args = mc.Arguments |> Seq.map render |> String.concat ", "
                     $"{mc.Method.Name}({args})"
@@ -1355,7 +1355,7 @@ let private renderSelectExpression (exp: Expression) : string * obj[] =
             $"{left} {op} {right}"
         | :? MethodCallExpression as mc when mc.Arguments.Count = 2 && (InfixOperators.tryGetOperator mc.Method.Name).IsSome ->
             let op = (InfixOperators.tryGetOperator mc.Method.Name).Value
-            $"{render mc.Arguments.[0]} {op} {render mc.Arguments.[1]}"
+            $"({render mc.Arguments.[0]} {op} {render mc.Arguments.[1]})"
         | :? MethodCallExpression as mc ->
             let args = mc.Arguments |> Seq.map render |> String.concat ", "
             $"{mc.Method.Name}({args})"
