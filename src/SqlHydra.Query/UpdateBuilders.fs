@@ -66,13 +66,14 @@ type UpdateBuilder<'Updated, 'UpdateReturn>() =
     member this.SetRaw (state: QuerySource<'T>, [<ProjectionParameter>] propertySelector: Expression<Func<'T, 'Prop>>, fragment: string) =
         this.SetRaw(state, propertySelector, fragment, [||])
 
-    /// Adds a column to the RETURNING clause (PostgreSQL).
+    /// Adds one or more columns to the RETURNING clause (PostgreSQL).
+    /// Pass a single property `e.id` or a tuple `(e.id, e.email, e.updated_at)`.
     [<CustomOperation("returning", MaintainsVariableSpace = true)>]
     member this.Returning (state: QuerySource<'T>, [<ProjectionParameter>] propertySelector: Expression<Func<'T, 'Prop>>) =
         let query = state |> getQueryOrDefault
-        let prop = LinqExpressionVisitors.visitPropertySelector<'T, 'Prop> propertySelector :?> Reflection.PropertyInfo
+        let cols = LinqExpressionVisitors.visitPropertiesSelector<'T, 'Prop> propertySelector (fun _ p -> p.Name)
         QuerySource<'T, UpdateQuerySpec<'T, 'UpdateReturn>>(
-            { query with Returning = query.Returning @ [ prop.Name ] }
+            { query with Returning = query.Returning @ cols }
             , state.TableMappings)
 
     /// Includes a column in the update query.

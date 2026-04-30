@@ -90,13 +90,14 @@ type InsertBuilder<'Inserted, 'InsertReturn>() =
             { spec with FromSelect = Some subquery.SelectIR }
             , state.TableMappings)
 
-    /// Adds a column to the RETURNING clause (PostgreSQL).
+    /// Adds one or more columns to the RETURNING clause (PostgreSQL/SQLite).
+    /// Pass a single property `e.id` or a tuple `(e.id, e.email, e.created_at)`.
     [<CustomOperation("returning", MaintainsVariableSpace = true)>]
     member this.Returning (state: QuerySource<'T>, [<ProjectionParameter>] propertySelector: System.Linq.Expressions.Expression<Func<'T, 'Prop>>) =
         let spec = state |> getQueryOrDefault
-        let prop = LinqExpressionVisitors.visitPropertySelector<'T, 'Prop> propertySelector :?> Reflection.PropertyInfo
+        let cols = LinqExpressionVisitors.visitPropertiesSelector<'T, 'Prop> propertySelector (fun _ p -> p.Name)
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
-            { spec with Returning = spec.Returning @ [ prop.Name ] }
+            { spec with Returning = spec.Returning @ cols }
             , state.TableMappings)
 
     /// Sets the identity field that should be returned from the insert and excludes it from the insert columns.

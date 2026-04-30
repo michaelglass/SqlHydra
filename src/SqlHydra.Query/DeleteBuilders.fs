@@ -43,13 +43,14 @@ type DeleteBuilder<'Deleted>() =
             { spec with Where = WhereClause.combineAnd spec.Where newClause; DeleteAll = false },
             state.TableMappings)
 
-    /// Adds a column to the DELETE ... RETURNING clause (PostgreSQL).
+    /// Adds one or more columns to the DELETE ... RETURNING clause (PostgreSQL).
+    /// Pass a single property or a tuple of properties.
     [<CustomOperation("returning", MaintainsVariableSpace = true)>]
     member this.Returning (state: QuerySource<'T>, [<ProjectionParameter>] propertySelector: Expression<Func<'T, 'Prop>>) =
         let spec = state |> getQueryOrDefault
-        let prop = LinqExpressionVisitors.visitPropertySelector<'T, 'Prop> propertySelector :?> Reflection.PropertyInfo
+        let cols = LinqExpressionVisitors.visitPropertiesSelector<'T, 'Prop> propertySelector (fun _ p -> p.Name)
         QuerySource<'T, DeleteQuerySpec<'T>>(
-            { spec with Returning = spec.Returning @ [ prop.Name ] },
+            { spec with Returning = spec.Returning @ cols },
             state.TableMappings)
 
     /// Safeguard verifying that all rows in the table should be deleted (no `where` clause).
