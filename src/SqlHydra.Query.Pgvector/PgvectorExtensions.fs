@@ -35,6 +35,8 @@ type SelectBuilder<'Selected, 'Mapped> with
                     OrderBy = state.Query.OrderBy @ [OrderByRaw ($"{fqCol} {operator} ?", [| vector |])] },
                 state.TableMappings)
         | LinqExpressionVisitors.OrderByIgnored -> state
+        | LinqExpressionVisitors.OrderByExpression _ ->
+            failwith "pgvector distance ordering requires a column reference, not an expression"
         | _ -> failwith "pgvector distance ordering requires a column reference, not an aggregate"
 
     /// ORDER BY column <=> @vector (pgvector cosine distance, ascending — closest first).

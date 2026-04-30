@@ -208,6 +208,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"{{%s{tableAlias}}}.{{%s{p.Name}}}"
                     [OrderByRaw (LinqExpressionVisitors.renderAggregate aggType fqCol, [||])]
+                | LinqExpressionVisitors.OrderByExpression (frag, parms) ->
+                    [OrderByRaw (frag, parms)]
                 | LinqExpressionVisitors.OrderByIgnored ->
                     []
         QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ newOrderBy }, state.TableMappings)
@@ -230,6 +232,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"{{%s{tableAlias}}}.{{%s{p.Name}}}"
                     [OrderByRaw ($"{LinqExpressionVisitors.renderAggregate aggType fqCol} DESC", [||])]
+                | LinqExpressionVisitors.OrderByExpression (frag, parms) ->
+                    [OrderByRaw ($"{frag} DESC", parms)]
                 | LinqExpressionVisitors.OrderByIgnored ->
                     []
         QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ newOrderBy }, state.TableMappings)
