@@ -1047,8 +1047,8 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                         let lt = qualifyColumn aliasL ml.Member
                         let rt = qualifyColumn aliasR mr.Member
                         CompareColumns(lt, compOp, rt)
-                    with _ -> notImpl()
-                | _ -> notImpl()
+                    with ex -> notImplMsg $"[where-cmp-asMember-thrown] {ex.Message}\nleft={left}\nright={right}"
+                | _ -> notImplMsg $"[where-cmp-fallthrough] op={compOp}\nleft={left}\nright={right}"
 
         | _ ->
             notImplMsg $"Unsupported expression type in where clause: {nexp}"
