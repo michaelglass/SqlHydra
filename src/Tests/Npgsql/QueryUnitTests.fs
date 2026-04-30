@@ -1064,3 +1064,37 @@ let ``Phase4: orderByCosineDistance + nullsLast retains parameter binding`` () =
     compiled.Sql.Contains("NULLS LAST") =! true
     compiled.Sql.Contains("<=>") =! true
     compiled.Parameters.Length =! 1
+
+// ─── Phase 5: anonymous record field aliases ───
+
+[<Test>]
+let ``Phase5: anonymous record renamed field emits AS alias`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select {| productId = p.productid; productCost = p.standardcost |}
+        }
+        |> toSql
+    sql.Contains("AS \"productId\"") =! true
+    sql.Contains("AS \"productCost\"") =! true
+
+[<Test>]
+let ``Phase5: anonymous record same-name multi-field`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select {| productid = p.productid; standardcost = p.standardcost |}
+        }
+        |> toSql
+    sql.Contains("\"p\".\"productid\"") =! true
+    sql.Contains("\"p\".\"standardcost\"") =! true
+
+[<Test>]
+let ``Phase5: anonymous record same-name field skips AS`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select {| ``name`` = p.``name`` |}
+        }
+        |> toSql
+    sql.Contains("AS \"name\"") =! false

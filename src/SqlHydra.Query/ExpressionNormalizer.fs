@@ -33,15 +33,27 @@ type private Normalizer() =
     inherit ExpressionVisitor()
 
     override this.VisitBlock(node) =
-        // Build substitution map for non-tuple-deconstruction variables.
-        // Variables assigned from MemberAccess (e.g., o = tupledArg.Item1) are preserved
-        // because visitAlias extracts table aliases from ParameterExpression names.
+        // Build substitution map.
+        // Tuple-deconstruction assigns like `o = tupledArg.Item1` are preserved — `o` becomes a
+        // table-alias parameter that visitAlias extracts. Identified by RHS being a `.ItemN`
+        // member access on the join's tuple parameter.
+        // Other member-access assigns (renamed anonymous-record fields like `renamedX = a.col`)
+        // ARE inlined so the visitor sees the column access directly.
+        let isTupleItemAccess (e: Expression) =
+            match e with
+            | :? MemberExpression as m ->
+                let name = m.Member.Name
+                name.StartsWith("Item")
+                && name.Length > 4
+                && System.Char.IsDigit(name.[4])
+                && (m.Expression :? ParameterExpression)
+            | _ -> false
         let substitutions = System.Collections.Generic.Dictionary<ParameterExpression, Expression>()
         for expr in node.Expressions do
             if expr.NodeType = ExpressionType.Assign then
                 let bin = expr :?> BinaryExpression
                 match bin.Left with
-                | :? ParameterExpression as p when bin.Right.NodeType <> ExpressionType.MemberAccess ->
+                | :? ParameterExpression as p when not (isTupleItemAccess bin.Right) ->
                     substitutions.[p] <- bin.Right
                 | _ -> ()
         let result = node.Expressions |> Seq.last

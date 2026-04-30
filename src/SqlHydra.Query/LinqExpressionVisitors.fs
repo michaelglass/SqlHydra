@@ -1555,7 +1555,13 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                 if newExpr.Members <> null && newExpr.Members.Count = args.Length then
                     newExpr.Members |> Seq.map (fun m -> Some m.Name) |> Seq.toList
                 else
-                    args |> List.map (fun _ -> None)
+                    // Fallback: read fields/properties from the anonymous record type itself.
+                    let t = newExpr.Type
+                    let props = t.GetProperties()
+                    if props.Length = args.Length then
+                        props |> Array.map (fun p -> Some p.Name) |> Array.toList
+                    else
+                        args |> List.map (fun _ -> None)
             args
             |> List.mapi (fun i nargs -> i, nargs, memberNames.[i])
             |> List.collect (fun (i, narg, fieldName) ->
@@ -1566,11 +1572,17 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
                     | _ ->
                         let frag, parms = renderSelectExpression newExpr.Arguments.[i]
                         [ SelectedExpressionWithParams (frag, parms) ]
-                // Wrap with SelectedAs only when the field name differs from the underlying column.
+                // Wrap with SelectedAs only when the field name is meaningful (not Item1/Item2/...
+                // tuple-positional names) and differs from the underlying column.
+                let isTuplePositional (n: string) =
+                    n.StartsWith("Item")
+                    && n.Length > 4
+                    && System.Char.IsDigit(n.[4])
+                let isMeaningfulAlias n = not (isTuplePositional n)
                 match fieldName, inner with
-                | Some fname, [ SelectedColumn (_, col, _, _, _) as sel ] when fname <> col ->
+                | Some fname, [ SelectedColumn (_, col, _, _, _) as sel ] when isMeaningfulAlias fname && fname <> col ->
                     [ SelectedAs (sel, fname) ]
-                | Some fname, [ (SelectedExpression _ | SelectedExpressionWithParams _) as sel ] ->
+                | Some fname, [ (SelectedExpression _ | SelectedExpressionWithParams _) as sel ] when isMeaningfulAlias fname ->
                     [ SelectedAs (sel, fname) ]
                 | _ -> inner)
         | NParameter p ->
