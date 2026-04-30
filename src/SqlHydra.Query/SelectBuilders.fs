@@ -110,6 +110,19 @@ type SelectBuilder<'Selected, 'Mapped> () =
     let qualifyColumnWithAlias (alias: string) (col: Reflection.MemberInfo) =
         $"%s{alias}.%s{col.Name}"
 
+    /// Combines outer + inner CTEs, deduplicating by alias (last write wins). Used when
+    /// a `cteFrom` source is the inner side of a `leftJoin'`/`join'` — the inner's
+    /// WithCtes must propagate, but the same source could be used in multiple joins.
+    let mergeCtes (outerIr: SelectQueryIR) (inner: QuerySource<'T>) =
+        let innerIr = inner |> getQueryOrDefault
+        if innerIr.WithCtes.IsEmpty then outerIr
+        else
+            let seen = System.Collections.Generic.HashSet<string>()
+            let merged =
+                outerIr.WithCtes @ innerIr.WithCtes
+                |> List.filter (fun (alias, _) -> seen.Add alias)
+            { outerIr with WithCtes = merged }
+
     member val MapFn = Option<Func<'Selected, 'Mapped>>.None with get, set
     member val CancellationToken = CancellationToken.None with get, set
     member val private PendingJoinInfo = Option<PendingJoin>.None with get, set
@@ -453,9 +466,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
             TableAlias = innerAlias
         }
 
-        let ir = outerSource |> getQueryOrDefault
-        let innerIr = innerSource |> getQueryOrDefault
-        let ir = { ir with WithCtes = ir.WithCtes @ innerIr.WithCtes }
+        let ir = mergeCtes (outerSource |> getQueryOrDefault) innerSource
         this.PendingJoinInfo <- Some pendingJoin
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
@@ -486,10 +497,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
             TableAlias = innerAlias
         }
 
-        // Propagate any WITH clauses from a `cteFrom` inner source onto the outer IR.
-        let outerIr = outerSource |> getQueryOrDefault
-        let innerIr = innerSource |> getQueryOrDefault
-        let ir = { outerIr with WithCtes = outerIr.WithCtes @ innerIr.WithCtes }
+        let ir = mergeCtes (outerSource |> getQueryOrDefault) innerSource
         this.PendingJoinInfo <- Some pendingJoin
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 

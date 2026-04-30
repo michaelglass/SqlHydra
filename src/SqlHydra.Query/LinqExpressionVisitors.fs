@@ -522,7 +522,10 @@ let private formatNumericLiteral (value: obj) (clrType: System.Type) =
     | t when t = typeof<single> || t = typeof<float32> -> (value :?> single).ToString("R", inv) |> formatFloat
     | t when t = typeof<decimal> -> (value :?> decimal).ToString(inv)
     | t when t.IsEnum || isNullaryDU t -> $"'{value}'"
-    | _ -> sprintf "%O" value
+    // Integer primitives (int, int64, byte, ...) — ToString is safe SQL for these.
+    // char/bool are excluded: bool is handled in renderObjAsLiteral; char would emit unquoted.
+    | t when t.IsPrimitive && t <> typeof<char> && t <> typeof<bool> -> sprintf "%O" value
+    | t -> failwithf "Cannot format SQL literal of type %s — wrap with inlineValue or parameterize." t.FullName
 
 /// Renders an evaluated runtime value as a SQL literal fragment.
 /// Used for `inlineValue` and static-field references (Guid.Empty, DateTime.MinValue, etc.).
