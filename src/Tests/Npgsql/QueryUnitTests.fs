@@ -972,13 +972,11 @@ let ``Phase3: nested aggregate-in-aggregate (MAX(SUM(x)))`` () =
     sql.Contains("AS FLOAT") =! true
 
 // ─── Phase 4: pgvector ───
-// Each pgvector test calls ensureRegistered () because F# `open type` does not reliably trigger
-// the static initializer that would register the infix operators. App callers should call
-// ensureRegistered () once at startup; we do it per-test for isolation.
+// Operator registration auto-fires via [<ModuleInitializer>] when the assembly loads —
+// no per-test setup needed.
 
 [<Test>]
 let ``Phase4: cosine_distance emits <=> infix in select`` () =
-    ensureRegistered ()
     let sql =
         select {
             for p in production.product do
@@ -989,7 +987,6 @@ let ``Phase4: cosine_distance emits <=> infix in select`` () =
 
 [<Test>]
 let ``Phase4: l2_distance emits <-> infix in select`` () =
-    ensureRegistered ()
     let sql =
         select {
             for p in production.product do
@@ -1000,7 +997,6 @@ let ``Phase4: l2_distance emits <-> infix in select`` () =
 
 [<Test>]
 let ``Phase4: inner_product_distance emits <#> infix in select`` () =
-    ensureRegistered ()
     let sql =
         select {
             for p in production.product do

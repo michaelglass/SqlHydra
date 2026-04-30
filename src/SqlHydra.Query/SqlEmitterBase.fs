@@ -244,8 +244,7 @@ type SqlEmitterBase() =
                     match col with
                     | AllColumns alias -> $"{this.QuoteIdentifier(alias)}.*"
                     | SpecificColumn name -> this.QuoteColumn(name)
-                    | RawColumn fragment -> this.QuoteRawFragment(fragment)
-                    | RawColumnWithParams (fragment, parms) ->
+                    | RawColumn (fragment, parms) ->
                         this.SubstituteParams(this.QuoteRawFragment(fragment), parms, collector)
                 )
                 |> String.concat ", "
@@ -308,8 +307,7 @@ type SqlEmitterBase() =
                     | OrderByColumn (col, Desc) -> $"{this.QuoteColumn(col)} DESC"
                     | OrderByColumnNulls (col, Asc, nulls) -> $"{this.QuoteColumn(col)}{nullsSuffix nulls}"
                     | OrderByColumnNulls (col, Desc, nulls) -> $"{this.QuoteColumn(col)} DESC{nullsSuffix nulls}"
-                    | OrderByRaw fragment -> this.QuoteRawFragment(fragment)
-                    | OrderByRawWithParams (fragment, parms) ->
+                    | OrderByRaw (fragment, parms) ->
                         this.SubstituteParams(this.QuoteRawFragment(fragment), parms, collector)
                 )
                 |> String.concat ", "

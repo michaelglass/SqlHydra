@@ -4,23 +4,16 @@ open System
 open System.Linq.Expressions
 open SqlHydra.Query
 
-/// Registers pgvector infix operators with the SqlHydra expression visitor.
-[<AutoOpen>]
-module PgvectorRegistration =
-    let private _doRegister =
-        InfixOperators.register "cosine_distance" "<=>"
-        InfixOperators.register "l2_distance" "<->"
-        InfixOperators.register "inner_product_distance" "<#>"
-
-    /// Call to ensure pgvector infix operators are registered.
-    /// This is a no-op but forces module initialization.
-    let ensureRegistered () = _doRegister
+// Register pgvector infix operators via assembly-level attributes.
+// SqlHydra.Query discovers these the first time a query is compiled — no setup call needed.
+[<assembly: SqlHydraInfixOperator("cosine_distance", "<=>")>]
+[<assembly: SqlHydraInfixOperator("l2_distance", "<->")>]
+[<assembly: SqlHydraInfixOperator("inner_product_distance", "<#>")>]
+do ()
 
 /// pgvector distance functions for use in select expressions.
 /// Use `open type PgvectorFn` to access functions without qualification.
-/// These emit PostgreSQL pgvector infix operators: <=> (cosine), <-> (L2), <#> (inner product).
-/// **Important:** call `ensureRegistered ()` once at app startup before issuing queries —
-/// `open type PgvectorFn` does not reliably trigger module/type initialization in F#.
+/// Emits PostgreSQL pgvector infix operators: `<=>` (cosine), `<->` (L2), `<#>` (inner product).
 type PgvectorFn =
     /// Cosine distance between two vectors. Emits: lhs <=> rhs
     static member cosine_distance(a: 'T, b: 'U) : float = sqlFn
@@ -39,7 +32,7 @@ type SelectBuilder<'Selected, 'Mapped> with
             let fqCol = $"\"{tableAlias}\".\"{p.Name}\""
             QuerySource<'T, SelectQueryIR>(
                 { state.Query with
-                    OrderBy = state.Query.OrderBy @ [OrderByRawWithParams ($"{fqCol} {operator} ?", [| vector |])] },
+                    OrderBy = state.Query.OrderBy @ [OrderByRaw ($"{fqCol} {operator} ?", [| vector |])] },
                 state.TableMappings)
         | LinqExpressionVisitors.OrderByIgnored -> state
         | _ -> failwith "pgvector distance ordering requires a column reference, not an aggregate"
