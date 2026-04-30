@@ -928,21 +928,44 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 Compare(fqCol, compOp, Parameter queryParameter)
 
             | NColumn (p, _), _ ->
-                let value = nEvaluate right
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
-                match value with
-                | null when op = ExpressionType.Equal -> IsNull(fqCol)
-                | null when op = ExpressionType.NotEqual -> IsNotNull(fqCol)
-                | _ ->
-                    let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
-                    Compare(fqCol, compOp, Parameter queryParameter)
+                // RHS may be a captured value (compile-and-eval) OR an outer-scope column
+                // reference in a lateral subquery (where the column's parameter isn't in
+                // the local `tables` map). Try eval; on failure, fall back to column ref.
+                let valueResult =
+                    try Some (nEvaluate right) with _ -> None
+                match valueResult with
+                | Some value ->
+                    match value with
+                    | null when op = ExpressionType.Equal -> IsNull(fqCol)
+                    | null when op = ExpressionType.NotEqual -> IsNotNull(fqCol)
+                    | _ ->
+                        let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
+                        Compare(fqCol, compOp, Parameter queryParameter)
+                | None ->
+                    match right with
+                    | NMemberAccess(_, m) when m.Expression <> null ->
+                        let rhsAlias = visitAlias m.Expression
+                        let rhsCol = qualifyColumn rhsAlias m.Member
+                        CompareColumns(fqCol, compOp, rhsCol)
+                    | _ -> notImplMsg $"Unable to evaluate where RHS: {right}"
 
             | _, NColumn (p, _) ->
-                let value = nEvaluate left
+                let valueResult =
+                    try Some (nEvaluate left) with _ -> None
                 let reversedOp = reverseComparisonOp compOp
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
+                match valueResult with
+                | None ->
+                    match left with
+                    | NMemberAccess(_, m) when m.Expression <> null ->
+                        let lhsAlias = visitAlias m.Expression
+                        let lhsCol = qualifyColumn lhsAlias m.Member
+                        CompareColumns(lhsCol, compOp, fqCol)
+                    | _ -> notImplMsg $"Unable to evaluate where LHS: {left}"
+                | Some value ->
                 match value with
                 | null when reversedOp = Eq -> IsNull(fqCol)
                 | null when reversedOp = NotEq -> IsNotNull(fqCol)
