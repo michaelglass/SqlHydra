@@ -415,7 +415,22 @@ type SelectBuilder<'Selected, 'Mapped> () =
                       innerSource: QuerySource<'Inner>,
                       resultSelector: Expression<Func<'Outer,'Inner,'JoinResult>> ) =
 
-        let mergedTables = mergeTableMappings (outerSource.TableMappings, innerSource.TableMappings)
+        // F#'s `IsLikeZip = true` semantics call Correlate BEFORE the enclosing `For`,
+        // so both outerSource.TableMappings and innerSource.TableMappings still have their
+        // tables under the `Root` key. A naive merge collapses both Roots and the later
+        // `For` lookup picks the wrong table. Convert each side's Root → TableAliasKey
+        // first using the parameter names from the resultSelector.
+        let outerAlias, innerAlias =
+            match resultSelector.Parameters |> Seq.toList with
+            | [outer; inner] -> outer.Name, inner.Name
+            | _ -> "", ""
+        let _, outerMappings =
+            if outerAlias = "" then None, outerSource.TableMappings
+            else TableMappings.tryGetByRootOrAlias outerAlias outerSource.TableMappings
+        let _, innerMappings =
+            if innerAlias = "" then None, innerSource.TableMappings
+            else TableMappings.tryGetByRootOrAlias innerAlias innerSource.TableMappings
+        let mergedTables = mergeTableMappings (outerMappings, innerMappings)
         let ir = outerSource |> getQueryOrDefault
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 

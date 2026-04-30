@@ -555,10 +555,19 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         | Member mem ->
             // Static fields have null .Expression (e.g. Guid.Empty, DateTime.MinValue, String.Empty).
             // Evaluate at compile time and inline as a SQL literal.
+            let inv = System.Globalization.CultureInfo.InvariantCulture
             match compileAndEval mem with
             | null -> "NULL"
             | :? string as s -> $"'{s}'"
-            | v -> sprintf "%O" v
+            | :? bool as b -> if b then "TRUE" else "FALSE"
+            | :? System.Guid as g -> $"'{g}'"
+            | :? System.DateTime as dt ->
+                let s = dt.ToString("yyyy-MM-dd HH:mm:ss", inv)
+                $"'{s}'"
+            | :? System.DateTimeOffset as dto ->
+                let s = dto.ToString("yyyy-MM-dd HH:mm:sszzz", inv)
+                $"'{s}'"
+            | v -> formatNumericLiteral v (v.GetType())
         | Constant c when c.Value = null -> "NULL"
         | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
         | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
