@@ -5,9 +5,9 @@ Branch `feature/postgres-enhancements-v4` from `upstream/replace-sqlkata` (v4.0.
 ## Test results
 
 - **253/253** unit tests on net10.0
-- **1117/1117 (100%)** integration tests in thellma/intelligence (real consumer)
+- **1117/1117 (100%)** integration tests in a downstream consumer project
 
-## Integration journey (intelligence/ consumer)
+## Integration journey (downstream consumer)
 
 | Stage | Failures |
 |---|---|
@@ -25,7 +25,7 @@ Branch `feature/postgres-enhancements-v4` from `upstream/replace-sqlkata` (v4.0.
 
 ### The 7→0 closing fixes (one-day push)
 
-Each of these was reproduced from the failing thellma tests, traced via SQL dumps + IR introspection, and fixed at the root rather than worked around:
+Each of these was reproduced from a failing downstream test, traced via SQL dumps + IR introspection, and fixed at the root rather than worked around:
 
 - **`cf5c8f0`** — `visitWhere` outer-scope column vs constant fallback; `nEvaluate` handles `NConstant`. Lateral subqueries comparing a correlate-d outer parameter (`gd2.delivery_status = delivered`) hit the `notImpl` arm because `gd2` wasn't in local tables.
 - **`20a18fa`** — `NAggregateColumn` returns None on non-column args (was throwing). Aggregates over arbitrary expressions (`countBy(caseWhen ...)`, `sumBy(caseWhen ...)`) now fall through to the NMethodCall arm and render via `visitSqlFn`/`renderExpr`.
@@ -139,7 +139,7 @@ The pre-existing 3-failure regression on the branch (`cosine_distance` not conve
 
 ## Done
 
-The port is functionally complete for the postgres-enhancements feature set on top of `upstream/replace-sqlkata`. **100% green** in the thellma/intelligence consumer (1117/1117). Open follow-ups are minor:
+The port is functionally complete for the postgres-enhancements feature set on top of `upstream/replace-sqlkata`. **100% green** in the downstream consumer (1117/1117). Open follow-ups are minor:
 
 - Vector parameter binding for `orderByCosineDistance` etc. (uses `?` placeholder; needs `RawColumnWithParams` plumbing to bind the actual vector).
 - Run integration tests on SqlServer + Oracle once those containers are spun up.
