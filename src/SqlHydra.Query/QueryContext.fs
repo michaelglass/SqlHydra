@@ -12,6 +12,8 @@ type private InsertExecMode =
     | ExecScalar
     | ExecOracleIdentity of DbParameter
     | ExecOutputClause of OutputField list
+    /// PostgreSQL/SQLite RETURNING clause — read columns from the result reader.
+    | ExecReturning of returningColumns: string list
 
 /// Contains methods that compile and read a query.
 type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
@@ -211,6 +213,54 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
             return entities |> Seq.tryHead
         }
 
+    /// Reads RETURNING clause columns into a single value or tuple matching 'Return.
+    /// Column types come from 'Return — when 'Return is a tuple, each element type is read in order;
+    /// when it's a single type, one column is read. Option/Nullable are unwrapped.
+    member private _.ReadReturningValues<'Return> (cmd: DbCommand) (cancel: CancellationToken) (returningCols: string list) =
+        task {
+            use! reader = cmd.ExecuteReaderAsync(cancel)
+            let! _ = reader.ReadAsync(cancel)
+
+            let elementTypes =
+                let t = typeof<'Return>
+                if FSharp.Reflection.FSharpType.IsTuple(t)
+                then FSharp.Reflection.FSharpType.GetTupleElements(t)
+                else [| t |]
+
+            let unwrap (t: System.Type) =
+                if t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<Option<_>>
+                then Some t.GenericTypeArguments.[0]
+                elif t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<System.Nullable<_>>
+                then Some t.GenericTypeArguments.[0]
+                else None
+
+            let values =
+                List.zip returningCols (List.ofArray elementTypes)
+                |> List.map (fun (colName, retType) ->
+                    let ord = reader.GetOrdinal(colName)
+                    match unwrap retType with
+                    | Some inner ->
+                        if reader.IsDBNull(ord) then
+                            if retType.GetGenericTypeDefinition() = typedefof<Option<_>>
+                            then None |> box
+                            else System.Activator.CreateInstance(retType) // Nullable default ()
+                        else
+                            let raw = reader[ord]
+                            // Construct Option<T>(value) or Nullable<T>(value).
+                            System.Activator.CreateInstance(retType, [| System.Convert.ChangeType(raw, inner) |])
+                    | None ->
+                        let raw = reader[ord]
+                        System.Convert.ChangeType(raw, retType))
+                |> List.toArray
+
+            match values with
+            | [| v |] -> return v :?> 'Return
+            | _ ->
+                let tupleType = FSharp.Reflection.FSharpType.MakeTupleType(elementTypes)
+                let tuple = FSharp.Reflection.FSharpValue.MakeTuple(values, tupleType)
+                return tuple :?> 'Return
+        }
+
     /// Reads output values from a DbCommand execution (for OUTPUT clause support).
     member private _.ReadOutputValues<'InsertReturn> (cmd: DbCommand) (cancel: CancellationToken) (outputFields: OutputField list) =
         task {
@@ -310,6 +360,10 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
             this.Logger { Sql = cmd.CommandText; Parameters = [] }
             cmd, ExecOutputClause outputFields
 
+        | { Returning = returning } when returning.Length > 0 ->
+            this.Logger { Sql = cmd.CommandText; Parameters = [] }
+            cmd, ExecReturning returning
+
         | _ ->
             this.Logger { Sql = cmd.CommandText; Parameters = [] }
             cmd, ExecNonQuery
@@ -329,6 +383,9 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
             Convert.ChangeType(outputParam.Value, typeof<'InsertReturn>) :?> 'InsertReturn
         | ExecOutputClause outputFields ->
             this.ReadOutputValues<'InsertReturn> cmd CancellationToken.None outputFields
+            |> Async.AwaitTask |> Async.RunSynchronously
+        | ExecReturning cols ->
+            this.ReadReturningValues<'InsertReturn> cmd CancellationToken.None cols
             |> Async.AwaitTask |> Async.RunSynchronously
 
     member this.InsertAsync<'T, 'InsertReturn> (query: InsertQuery<'T, 'InsertReturn>) =
@@ -352,6 +409,9 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
             | ExecOutputClause outputFields ->
                 let! outputValues = this.ReadOutputValues<'InsertReturn> cmd cancel outputFields
                 return outputValues
+            | ExecReturning cols ->
+                let! returnValues = this.ReadReturningValues<'InsertReturn> cmd cancel cols
+                return returnValues
         }
 
     member this.Update (query: UpdateQuery<'T, 'UpdateReturn>) =
