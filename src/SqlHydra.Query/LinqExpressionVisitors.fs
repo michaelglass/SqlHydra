@@ -313,10 +313,7 @@ module SqlPatterns =
                 | _ -> None
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
-            | other ->
-                match unwrapToProperty other with
-                | Some p -> Some (aggType, p)
-                | None -> notImplMsg $"Invalid argument to aggregate function. arg={other.GetType().Name}: {other}"
+            | other -> unwrapToProperty other |> Option.map (fun p -> aggType, p)
         | _ -> None
 
 // ─── NormalizedExpression Patterns ───────────────────────────────────────────
@@ -415,12 +412,14 @@ module NormalizedPatterns =
         | _ -> None
 
     /// Aggregate column pattern (minBy, maxBy, sumBy, avgBy, countBy, avgByAs).
+    /// Matches only when the aggregate's argument resolves to a column (direct Property or
+    /// Option/Nullable Value chain). Aggregates over arbitrary expressions (e.g.
+    /// `countBy(caseWhen ...)`) fall through to the NMethodCall arm, which delegates to
+    /// `visitSqlFn`/`renderExpr` for full expression rendering.
     let (|NAggregateColumn|_|) (nexp: NormalizedExpression) =
         match nexp with
         | NMethodCall(m, _) when aggregateMethodNames.Contains m.Method.Name ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
-            // Argument may be a direct Property `col` or an Option/Nullable Value chain
-            // like `opt.Value.col` (after a leftJoin'). Walk through wrappers.
             let rec unwrapToProperty (e: Expression) =
                 match e with
                 | Property (p, ext) -> Some (p, ext)
@@ -429,10 +428,7 @@ module NormalizedPatterns =
                 | _ -> None
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
-            | other ->
-                match unwrapToProperty other with
-                | Some p -> Some (aggType, p)
-                | None -> notImplMsg $"Invalid argument to aggregate function. arg={other.GetType().Name}: {other}"
+            | other -> unwrapToProperty other |> Option.map (fun p -> aggType, p)
         | _ -> None
 
     /// List initializer — delegates to original ListInit pattern.
