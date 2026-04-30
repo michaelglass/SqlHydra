@@ -468,6 +468,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
         }
 
         let ir = outerSource |> getQueryOrDefault
+        let innerIr = innerSource |> getQueryOrDefault
+        let ir = { ir with WithCtes = ir.WithCtes @ innerIr.WithCtes }
         this.PendingJoinInfo <- Some pendingJoin
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
@@ -501,6 +503,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
         }
 
         let ir = outerSource |> getQueryOrDefault
+        // Propagate any WITH clauses from a `cteFrom` inner source onto the outer IR.
+        let innerIr = innerSource |> getQueryOrDefault
+        let ir = { ir with WithCtes = ir.WithCtes @ innerIr.WithCtes }
         this.PendingJoinInfo <- Some pendingJoin
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
