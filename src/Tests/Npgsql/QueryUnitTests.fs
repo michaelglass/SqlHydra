@@ -1,7 +1,9 @@
 ﻿module Npgsql.``Query Unit Tests``
 
+open System
 open Swensen.Unquote
 open SqlHydra.Query
+open SqlHydra.Query.NpgsqlExtensions
 open NUnit.Framework
 open DB
 #if NET8_0
@@ -596,3 +598,214 @@ let ``Issue125-14 OrderBy with aggregate after join``() =
         |> toSql
 
     sql.Contains("ORDER BY SUM(\"d\".\"unitprice\")") =! true
+
+// ─── Phase 2 port from postgres-enhancements ───
+
+[<Test>]
+let ``Phase2: orderBy + nullsLast emits NULLS LAST`` () =
+    let sql =
+        select {
+            for a in person.address do
+            orderBy a.city
+            nullsLast
+        }
+        |> toSql
+    sql.Contains("NULLS LAST") =! true
+
+[<Test>]
+let ``Phase2: orderByDescending + nullsFirst emits DESC NULLS FIRST`` () =
+    let sql =
+        select {
+            for a in person.address do
+            orderByDescending a.city
+            nullsFirst
+        }
+        |> toSql
+    sql.Contains("DESC NULLS FIRST") =! true
+
+[<Test>]
+let ``Phase2: orderByRaw emits literal fragment`` () =
+    let sql =
+        select {
+            for a in person.address do
+            orderByRaw "RANDOM()"
+        }
+        |> toSql
+    sql.Contains("RANDOM()") =! true
+
+[<Test>]
+let ``Phase2: orderByAlias quotes alias`` () =
+    let sql =
+        select {
+            for a in person.address do
+            orderByAlias "score"
+        }
+        |> toSql
+    sql.Contains("ORDER BY \"score\"") =! true
+
+[<Test>]
+let ``Phase2: havingRaw emits raw HAVING`` () =
+    let sql =
+        select {
+            for a in person.address do
+            groupBy a.city
+            havingRaw "COUNT(*) > 5"
+            select a.city
+        }
+        |> toSql
+    sql.Contains("HAVING") =! true
+    sql.Contains("COUNT(*) > 5") =! true
+
+[<Test>]
+let ``Phase2: distinctOn emits DISTINCT ON (col)`` () =
+    let sql =
+        select {
+            for a in person.address do
+            distinctOn a.city
+        }
+        |> toSql
+    sql.Contains("DISTINCT ON (\"a\".\"city\")") =! true
+
+[<Test>]
+let ``Phase2: whereExists wraps subquery in EXISTS`` () =
+    let sub =
+        select {
+            for d in sales.salesorderdetail do
+            select d.salesorderid
+        }
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            whereExists sub
+            select o.salesorderid
+        }
+        |> toSql
+    sql.Contains("EXISTS (") =! true
+    sql.Contains("\"sales\".\"salesorderdetail\"") =! true
+
+[<Test>]
+let ``Phase2: whereNotExists emits NOT EXISTS`` () =
+    let sub =
+        select {
+            for d in sales.salesorderdetail do
+            select d.salesorderid
+        }
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            whereNotExists sub
+        }
+        |> toSql
+    sql.Contains("NOT EXISTS (") =! true
+
+[<Test>]
+let ``Phase2: cte produces WITH clause and references alias as FROM`` () =
+    let inner =
+        select {
+            for a in person.address do
+            where (a.city = "Dallas")
+        }
+    let recent = cte<person.address> "recent_addrs" inner
+    let sql =
+        select {
+            for r in recent do
+            select r.addressid
+        }
+        |> toSql
+    sql.Contains("WITH \"recent_addrs\" AS (") =! true
+    sql.Contains("FROM \"recent_addrs\" AS \"r\"") =! true
+
+[<Test>]
+let ``Phase2: lateralJoin emits LEFT JOIN LATERAL (subquery)`` () =
+    let sub =
+        select {
+            for d in sales.salesorderdetail do
+            select d.salesorderid
+        }
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            lateralJoin sub "lat"
+            select o.salesorderid
+        }
+        |> toSql
+    sql.Contains("LEFT JOIN LATERAL (") =! true
+    sql.Contains(") AS \"lat\"") =! true
+
+let private sampleAddress () : person.address =
+    { addressid = 0
+      addressline1 = "1"
+      addressline2 = None
+      city = "X"
+      stateprovinceid = 0
+      postalcode = "1"
+      spatiallocation = None
+      rowguid = Guid.NewGuid()
+      modifieddate = DateTime.UtcNow }
+
+[<Test>]
+let ``Phase2: insert with returning emits RETURNING column`` () =
+    let row = sampleAddress ()
+    let q =
+        insert {
+            for a in person.address do
+            entity row
+            returning a.addressid
+        }
+    let sql = toInsertSql q
+    sql.Contains("RETURNING \"addressid\"") =! true
+
+[<Test>]
+let ``Phase2: update with setRaw and returning`` () =
+    let q =
+        update {
+            for a in person.address do
+            setRaw a.city "UPPER(?)" [| box "dallas" |]
+            where (a.addressid = 1)
+            returning a.city
+        }
+    let sql = toUpdateSql q
+    sql.Contains("SET \"city\" = UPPER(") =! true
+    sql.Contains("RETURNING \"city\"") =! true
+
+[<Test>]
+let ``Phase2: insert fromSelect emits INSERT INTO ... SELECT`` () =
+    let src =
+        select {
+            for a in person.address do
+            select a.addressline1
+        }
+    let q =
+        insert {
+            for a in person.address do
+            fromSelect src
+            includeColumn a.addressline1
+        }
+    let sql = toInsertSql q
+    sql.Contains("INSERT INTO \"person\".\"address\" (\"addressline1\") SELECT") =! true
+
+[<Test>]
+let ``Phase2: onConflictDoUpdateCoalesce emits COALESCE expressions`` () =
+    let row = sampleAddress ()
+    let q =
+        insert {
+            for a in person.address do
+            entity row
+            onConflictDoUpdateCoalesce a.addressid a.city
+        }
+    let sql = toInsertSql q
+    sql.Contains("ON CONFLICT(addressid) DO UPDATE SET") =! true
+    sql.Contains("\"city\" = COALESCE(EXCLUDED.\"city\", \"city\")") =! true
+
+[<Test>]
+let ``Phase2: onConflictDoNothingRawTarget emits raw target expr`` () =
+    let row = sampleAddress ()
+    let q =
+        insert {
+            for a in person.address do
+            entity row
+            onConflictDoNothingRawTarget "lower(addressline1)"
+        }
+    let sql = toInsertSql q
+    sql.Contains("ON CONFLICT(lower(addressline1))") =! true
+    sql.Contains("DO NOTHING") =! true
