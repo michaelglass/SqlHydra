@@ -106,6 +106,32 @@ module Aggregates =
     /// Gets the AVG of the given column and returns 'Result.
     let avgByAs<'P, 'Result when 'P : struct and 'Result : struct> (prop: 'P) : 'Result = Unchecked.defaultof<'Result>
 
+    /// Gets the COUNT(DISTINCT col) of the given column.
+    let countDistinct (prop: 'P) = Unchecked.defaultof<int>
+
+[<AutoOpen>]
+module CastFunctions =
+    /// CAST(expression AS targetType).
+    /// The target SQL type is inferred from the F# return type:
+    /// float/double → FLOAT, int → INTEGER, int64 → BIGINT, decimal → NUMERIC, string → TEXT, bool → BOOLEAN.
+    let castAs<'Result> (value: 'T) : 'Result = Unchecked.defaultof<'Result>
+
+/// Registry for SQL functions that should be emitted as infix operators.
+/// Register a function name to emit `left OP right` instead of `fn(left, right)`.
+/// Used by extension packages (e.g. pgvector) to expose custom infix operators.
+module InfixOperators =
+    let private registry = System.Collections.Concurrent.ConcurrentDictionary<string, string>()
+
+    /// Register a function name to be emitted as an infix operator.
+    let register (fnName: string) (operator: string) =
+        registry.[fnName] <- operator
+
+    /// Look up whether a function should be emitted as an infix operator.
+    let tryGetOperator (fnName: string) =
+        match registry.TryGetValue(fnName) with
+        | true, op -> Some op
+        | _ -> None
+
 [<AutoOpen>]
 module SqlFunctions =
 

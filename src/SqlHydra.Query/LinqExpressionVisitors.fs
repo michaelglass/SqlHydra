@@ -8,6 +8,29 @@ open FastExpressionCompiler
 let notImpl() = raise (NotImplementedException())
 let notImplMsg msg = raise (NotImplementedException msg)
 
+/// Renders an aggregate function call. Special-cases COUNTDISTINCT → COUNT(DISTINCT col).
+let renderAggregate (aggType: string) (col: string) =
+    if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT {col})"
+    else $"{aggType}({col})"
+
+/// Maps an F# CLR type to its SQL CAST target type name.
+let sqlTypeForClrType (t: System.Type) =
+    let t =
+        if t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<option<_>>
+        then t.GetGenericArguments().[0]
+        elif t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<System.Nullable<_>>
+        then System.Nullable.GetUnderlyingType(t)
+        else t
+    if t = typeof<float> || t = typeof<double> then "FLOAT"
+    elif t = typeof<float32> || t = typeof<single> then "REAL"
+    elif t = typeof<int> || t = typeof<int32> then "INTEGER"
+    elif t = typeof<int64> then "BIGINT"
+    elif t = typeof<int16> then "SMALLINT"
+    elif t = typeof<decimal> then "NUMERIC"
+    elif t = typeof<string> then "TEXT"
+    elif t = typeof<bool> then "BOOLEAN"
+    else t.Name
+
 
 [<AutoOpen>]
 module VisitorPatterns =
@@ -269,7 +292,7 @@ module SqlPatterns =
 
     let (|AggregateColumn|_|) (exp: Expression) =
         match exp with
-        | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs ] ->
+        | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
@@ -374,7 +397,7 @@ module NormalizedPatterns =
     /// Aggregate column pattern (minBy, maxBy, sumBy, avgBy, countBy, avgByAs).
     let (|NAggregateColumn|_|) (nexp: NormalizedExpression) =
         match nexp with
-        | NMethodCall(m, _) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs ] ->
+        | NMethodCall(m, _) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
@@ -449,29 +472,48 @@ let visitAlias (exp: Expression) =
 /// Converts a SQL function MethodCall expression to a SQL fragment string.
 /// Example: LEN(p.FirstName) -> "LEN({p}.{FirstName})"
 let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Expression) : string =
+    let rec renderArg (arg: Expression) =
+        match arg with
+        // Unwrap implicit numeric conversions (e.g., int → float when a column type widens).
+        | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
+            renderArg u.Operand
+        | Member mem when mem.Expression <> null ->
+            let alias = visitAlias mem.Expression
+            qualifyColumn alias mem.Member
+        | Constant c when c.Value = null ->
+            "NULL"
+        | Constant c when c.Type = typeof<string> ->
+            $"'{c.Value}'"
+        | Constant c ->
+            sprintf "%O" c.Value
+        | MethodCall _ as nested ->
+            visitSqlFn qualifyColumn nested
+        | _ ->
+            notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
+
     match exp with
+    // CAST(expr AS sqlType) — target SQL type inferred from the F# return type.
+    | MethodCall m when m.Method.Name = "castAs" && m.Arguments.Count = 1 ->
+        let inner = renderArg m.Arguments.[0]
+        let sqlType = sqlTypeForClrType m.Method.ReturnType
+        $"CAST({inner} AS {sqlType})"
+    // Aggregates → render via renderAggregate (handles COUNT(DISTINCT col)).
+    | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
+        let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+        match m.Arguments.[0] with
+        | Member mem when mem.Expression <> null ->
+            let alias = visitAlias mem.Expression
+            renderAggregate aggType (qualifyColumn alias mem.Member)
+        | _ -> notImplMsg "Unsupported aggregate argument"
+    // 2-arg method calls registered as infix operators (e.g. pgvector cosine_distance → <=>).
+    | MethodCall m when m.Arguments.Count = 2 && (InfixOperators.tryGetOperator m.Method.Name).IsSome ->
+        let op = (InfixOperators.tryGetOperator m.Method.Name).Value
+        let left = renderArg m.Arguments.[0]
+        let right = renderArg m.Arguments.[1]
+        $"{left} {op} {right}"
     | MethodCall m ->
         let fnName = m.Method.Name
-        let args =
-            m.Arguments
-            |> Seq.map (fun arg ->
-                match arg with
-                | Member mem ->
-                    let alias = visitAlias mem.Expression
-                    qualifyColumn alias mem.Member
-                | Constant c when c.Value = null ->
-                    "NULL"
-                | Constant c when c.Type = typeof<string> ->
-                    $"'{c.Value}'"
-                | Constant c ->
-                    sprintf "%O" c.Value
-                | MethodCall _ as nested ->
-                    // Handle nested function calls
-                    visitSqlFn qualifyColumn nested
-                | _ ->
-                    notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
-            )
-            |> String.concat ", "
+        let args = m.Arguments |> Seq.map renderArg |> String.concat ", "
         $"{fnName}({args})"
     | _ ->
         notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
@@ -872,7 +914,7 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                 then IsNull(fqCol)
                 else IsNotNull(fqCol)
             | _ -> notImpl()
-        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs ] ->
+        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
             visit args.[0]
         | NBinaryAnd(left, right) ->
             let lt = visit left
@@ -899,11 +941,11 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                 let rt =
                     let alias = visitAlias p2.Expression
                     qualifyColumn alias p2.Member
-                RawWhere($"{aggType}({lt}) {comparison} {rt}", [||])
+                RawWhere($"{renderAggregate aggType lt} {comparison} {rt}", [||])
             | NAggregateColumn (aggType, (p, _)), NValue value ->
                 let alias = visitAlias p.Expression
                 let lt = qualifyColumn alias p.Member
-                RawWhere($"{aggType}({lt}) {comparison} ?", [|value|])
+                RawWhere($"{renderAggregate aggType lt} {comparison} ?", [|value|])
             | NColumn (p1, _), NColumn (p2, _) ->
                 let lt =
                     let alias = visitAlias p1.Expression
@@ -1191,7 +1233,7 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
         | NAggregateColumn (aggType, (p, _)) ->
             let alias = visitAlias p.Expression
             let fqCol = $"{{%s{alias}}}.{{%s{p.Member.Name}}}"
-            [ SelectedExpression $"{aggType}({fqCol})" ]
+            [ SelectedExpression (renderAggregate aggType fqCol) ]
         | NMethodCall(m, _) ->
             let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
             let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
