@@ -117,11 +117,15 @@ type PostgresEmitter() =
                 .AppendLine(identityQuery)
                 .ToString()
 
-        | OnConflictDoUpdateCoalesce (conflictFields, updateFields) ->
+        | OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) ->
             let insertQuery, identityQuery = this.SplitInsertAndIdentity(insertSql)
+            let coalesceSet = Set.ofList coalesceFields
             let setLines =
                 updateFields
-                |> List.map (fun col -> $"\"{col}\" = COALESCE(EXCLUDED.\"{col}\", \"{col}\")\n")
+                |> List.map (fun col ->
+                    if coalesceSet.Contains col
+                    then $"\"{col}\" = COALESCE(EXCLUDED.\"{col}\", \"{col}\")\n"
+                    else $"\"{col}\" = EXCLUDED.\"{col}\"\n")
                 |> fun lines -> String.Join(",", lines)
             let conflictCsv = String.Join(",", conflictFields)
             StringBuilder()
@@ -202,11 +206,15 @@ type SqliteEmitter() =
                 .AppendLine(identityQuery)
                 .ToString()
 
-        | OnConflictDoUpdateCoalesce (conflictFields, updateFields) ->
+        | OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) ->
             let insertQuery, identityQuery = this.SplitInsertAndIdentity(insertSql)
+            let coalesceSet = Set.ofList coalesceFields
             let setLines =
                 updateFields
-                |> List.map (fun col -> $"\"{col}\" = COALESCE(EXCLUDED.\"{col}\", \"{col}\")\n")
+                |> List.map (fun col ->
+                    if coalesceSet.Contains col
+                    then $"\"{col}\" = COALESCE(EXCLUDED.\"{col}\", \"{col}\")\n"
+                    else $"\"{col}\" = EXCLUDED.\"{col}\"\n")
                 |> fun lines -> String.Join(",", lines)
             let conflictCsv = String.Join(",", conflictFields)
             StringBuilder()
