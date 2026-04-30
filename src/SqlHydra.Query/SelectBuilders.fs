@@ -261,7 +261,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                 WhereClause.combineAndFlat acc cond
             ) WhereClause.Empty
 
-        let joinClause = { Kind = InnerJoin; Table = innerTableNameAsAlias; Condition = joinCondition }
+        let joinClause = { Kind = InnerJoin; Table = innerTableNameAsAlias; Subquery = None; Condition = joinCondition }
         QuerySource<'JoinResult, SelectQueryIR>({ ir with Joins = ir.Joins @ [joinClause] }, mergedTables)
 
     /// LEFT JOIN table on one or more columns
@@ -308,7 +308,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                 WhereClause.combineAndFlat acc cond
             ) WhereClause.Empty
 
-        let joinClause = { Kind = LeftJoin; Table = innerTableNameAsAlias; Condition = joinCondition }
+        let joinClause = { Kind = LeftJoin; Table = innerTableNameAsAlias; Subquery = None; Condition = joinCondition }
         QuerySource<'JoinResult, SelectQueryIR>({ ir with Joins = ir.Joins @ [joinClause] }, mergedTables)
 
     /// References a table variable from a correlated parent query from within a subquery.
@@ -409,7 +409,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
             | JoinType.Inner -> InnerJoin
             | JoinType.Left -> LeftJoin
 
-        let joinClause = { Kind = joinKind; Table = tableNameAsAlias; Condition = joinCondition }
+        let joinClause = { Kind = joinKind; Table = tableNameAsAlias; Subquery = None; Condition = joinCondition }
 
         QuerySource<'T, SelectQueryIR>({ ir with Joins = ir.Joins @ [joinClause] }, state.TableMappings)
 

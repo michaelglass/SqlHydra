@@ -5,7 +5,7 @@ module SqlHydra.Query.DeleteBuilders
 open System.Threading
 
 let private prepareDeleteQuery<'Deleted> (ir: SelectQueryIR) =
-    DeleteQuery<'Deleted>({ Table = ir.From |> Option.defaultValue ""; Where = ir.Where })
+    DeleteQuery<'Deleted>({ Table = ir.From |> Option.defaultValue ""; Where = ir.Where; Returning = [] })
 
 /// The base delete builder that contains all common operations
 type DeleteBuilder<'Deleted>() =
