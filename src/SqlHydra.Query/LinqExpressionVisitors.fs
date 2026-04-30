@@ -506,6 +506,7 @@ let private compileAndEval (e: Expression) =
 
 /// Formats a numeric constant as SQL literal, preserving the type's decimal form for floats.
 /// `1.0` (double) → "1.0", not "1" (which Postgres types as integer and breaks `1.0 - <vector>` queries).
+/// Enums are quoted as their string name (Postgres treats unknown bare identifiers as columns).
 let private formatNumericLiteral (value: obj) (clrType: System.Type) =
     let inv = System.Globalization.CultureInfo.InvariantCulture
     if clrType = typeof<float> || clrType = typeof<double> then
@@ -518,6 +519,11 @@ let private formatNumericLiteral (value: obj) (clrType: System.Type) =
         if s.Contains(".") || s.Contains("e") || s.Contains("E") then s else s + ".0"
     elif clrType = typeof<decimal> then
         (value :?> decimal).ToString(inv)
+    elif clrType.IsEnum
+         || (FSharp.Reflection.FSharpType.IsUnion(clrType)
+             && FSharp.Reflection.FSharpType.GetUnionCases(clrType) |> Array.forall (fun c -> c.GetFields().Length = 0)) then
+        // C# enum or F# DU with all nullary cases — render its name as a string literal.
+        $"'{value}'"
     else
         sprintf "%O" value
 
