@@ -1028,19 +1028,27 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
             | NValue _, NValue _ ->
                 notImplMsg("Value to value comparisons are not currently supported. Ex: where (1 = 1)")
 
-            // Fallback: both sides are member-access chains on parameters that aren't in
-            // the local `tables` map (e.g. outer-scope columns inside a lateral subquery).
-            // Treat as column-to-column comparison.
-            | NMemberAccess (_, ml), NMemberAccess (_, mr) when ml.Expression <> null && mr.Expression <> null ->
-                try
-                    let aliasL = visitAlias ml.Expression
-                    let aliasR = visitAlias mr.Expression
-                    let lt = qualifyColumn aliasL ml.Member
-                    let rt = qualifyColumn aliasR mr.Member
-                    CompareColumns(lt, compOp, rt)
-                with _ -> notImpl()
             | _ ->
-                notImpl()
+                // Fallback: try to render both sides as outer-scope column refs
+                // (e.g. lateral subquery referencing correlate-d outer table.)
+                // Walk through NUnary(Convert, _), NMethodCall(Some, _), NMemberAccess to find a Member chain.
+                let rec asMember (n: NormalizedExpression) =
+                    match n with
+                    | NMemberAccess(_, m) when m.Expression <> null -> Some m
+                    | NUnary(ExpressionType.Convert, inner) -> asMember inner
+                    | NMethodCall(call, _) when call.Method.Name = "Some" && call.Arguments.Count = 1 ->
+                        asMember (visitExpression call.Arguments.[0])
+                    | _ -> None
+                match asMember left, asMember right with
+                | Some ml, Some mr ->
+                    try
+                        let aliasL = visitAlias ml.Expression
+                        let aliasR = visitAlias mr.Expression
+                        let lt = qualifyColumn aliasL ml.Member
+                        let rt = qualifyColumn aliasR mr.Member
+                        CompareColumns(lt, compOp, rt)
+                    with _ -> notImpl()
+                | _ -> notImpl()
 
         | _ ->
             notImplMsg $"Unsupported expression type in where clause: {nexp}"
