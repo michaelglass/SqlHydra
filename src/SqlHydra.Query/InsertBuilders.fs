@@ -82,6 +82,23 @@ type InsertBuilder<'Inserted, 'InsertReturn>() =
             |> (fun x -> { spec with Fields = x })
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
     
+    /// Inserts the result of a SELECT query: INSERT INTO ... (cols) <select-subquery>
+    [<CustomOperation("fromSelect", MaintainsVariableSpace = true)>]
+    member this.FromSelect (state: QuerySource<'T>, subquery: SelectQuery) =
+        let spec = state |> getQueryOrDefault
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
+            { spec with FromSelect = Some subquery.SelectIR }
+            , state.TableMappings)
+
+    /// Adds a column to the RETURNING clause (PostgreSQL).
+    [<CustomOperation("returning", MaintainsVariableSpace = true)>]
+    member this.Returning (state: QuerySource<'T>, [<ProjectionParameter>] propertySelector: System.Linq.Expressions.Expression<Func<'T, 'Prop>>) =
+        let spec = state |> getQueryOrDefault
+        let prop = LinqExpressionVisitors.visitPropertySelector<'T, 'Prop> propertySelector :?> Reflection.PropertyInfo
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
+            { spec with Returning = spec.Returning @ [ prop.Name ] }
+            , state.TableMappings)
+
     /// Sets the identity field that should be returned from the insert and excludes it from the insert columns.
     [<CustomOperation("getId", MaintainsVariableSpace = true)>]
     member this.GetId (state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, [<ProjectionParameter>] idProperty) = 
@@ -113,7 +130,7 @@ type InsertAsyncBuilder<'Inserted, 'InsertReturn>(ct: ContextType) =
                 let insertQuery = InsertQuery<'Inserted, 'InsertReturn>(state.Query)
                 let! asyncCancel = Async.CancellationToken
                 let cancel = if this.CancellationToken <> CancellationToken.None then this.CancellationToken else asyncCancel
-                if state.Query.Entities |> Seq.isEmpty then
+                if state.Query.Entities |> Seq.isEmpty && state.Query.FromSelect.IsNone then
                     return Unchecked.defaultof<'InsertReturn>
                 else
                     let! insertReturn = ctx.InsertAsyncWithOptions (insertQuery, cancel) |> Async.AwaitTask
@@ -132,7 +149,7 @@ type InsertTaskBuilder<'Inserted, 'InsertReturn>(ct: ContextType) =
             let! ctx = ContextUtils.getContext ct
             try
                 let insertQuery = InsertQuery<'Inserted, 'InsertReturn>(state.Query)
-                if state.Query.Entities |> Seq.isEmpty then
+                if state.Query.Entities |> Seq.isEmpty && state.Query.FromSelect.IsNone then
                     return Unchecked.defaultof<'InsertReturn>
                 else
                     let! insertReturn = ctx.InsertAsyncWithOptions (insertQuery, this.CancellationToken)

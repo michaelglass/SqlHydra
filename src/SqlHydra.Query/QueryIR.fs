@@ -146,6 +146,9 @@ and SelectQueryIR = {
     DistinctOn: string list
     /// SELECT COUNT(*) flag
     IsCount: bool
+    /// Carrier for DELETE ... RETURNING column list when this IR is being used by the DELETE builder.
+    /// Ignored when emitting SELECT.
+    Returning: string list
 }
 
 /// Helpers for composing WhereClause values.
@@ -183,6 +186,7 @@ module SelectQueryIR =
         Distinct = false
         DistinctOn = []
         IsCount = false
+        Returning = []
     }
 
 // ─── Insert-related types ───

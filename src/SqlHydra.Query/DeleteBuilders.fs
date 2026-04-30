@@ -2,10 +2,11 @@
 [<AutoOpen>]
 module SqlHydra.Query.DeleteBuilders
 
+open System
 open System.Threading
 
 let private prepareDeleteQuery<'Deleted> (ir: SelectQueryIR) =
-    DeleteQuery<'Deleted>({ Table = ir.From |> Option.defaultValue ""; Where = ir.Where; Returning = [] })
+    DeleteQuery<'Deleted>({ Table = ir.From |> Option.defaultValue ""; Where = ir.Where; Returning = ir.Returning })
 
 /// The base delete builder that contains all common operations
 type DeleteBuilder<'Deleted>() =
@@ -37,6 +38,13 @@ type DeleteBuilder<'Deleted>() =
         let tableMappings = state.TableMappings |> Map.values
         let newClause = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression (FQ.fullyQualifyColumn state.TableMappings)
         QuerySource<'T, SelectQueryIR>({ ir with Where = WhereClause.combineAnd ir.Where newClause }, state.TableMappings)
+
+    /// Adds a column to the DELETE ... RETURNING clause (PostgreSQL).
+    [<CustomOperation("returning", MaintainsVariableSpace = true)>]
+    member this.Returning (state: QuerySource<'T>, [<ProjectionParameter>] propertySelector: System.Linq.Expressions.Expression<Func<'T, 'Prop>>) =
+        let ir = state |> getQueryOrDefault
+        let prop = LinqExpressionVisitors.visitPropertySelector<'T, 'Prop> propertySelector :?> Reflection.PropertyInfo
+        QuerySource<'T, SelectQueryIR>({ ir with Returning = ir.Returning @ [ prop.Name ] }, state.TableMappings)
 
     /// Deletes all records in the table (only when there are is no where clause)
     [<CustomOperation("deleteAll", MaintainsVariableSpace = true)>]

@@ -76,9 +76,12 @@ type InsertQuerySpec<'T, 'Identity> =
         IdentityField: string option
         OutputFields: OutputField list
         InsertType: InsertType
+        Returning: string list
+        FromSelect: SelectQueryIR option
     }
     static member Default : InsertQuerySpec<'T, 'Identity> =
-        { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []; InsertType = Insert }
+        { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []
+          InsertType = Insert; Returning = []; FromSelect = None }
 
 type UpdateQuerySpec<'T, 'UpdateReturn> =
     {
@@ -86,12 +89,15 @@ type UpdateQuerySpec<'T, 'UpdateReturn> =
         Entity: 'T option
         Fields: string list
         SetValues: (string * obj) list
+        RawSetValues: (string * string * obj[]) list
         Where: WhereClause
         OutputFields: OutputField list
         UpdateAll: bool
+        Returning: string list
     }
     static member Default : UpdateQuerySpec<'T, 'UpdateReturn> =
-        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; Where = WhereClause.Empty; OutputFields = []; UpdateAll = false }
+        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; RawSetValues = []
+          Where = WhereClause.Empty; OutputFields = []; UpdateAll = false; Returning = [] }
 
 type QuerySource<'T>(tableMappings) =
     interface IEnumerable<'T> with
@@ -193,16 +199,17 @@ module internal QueryUtils =
                     |> Array.toList
 
             | Some _, _ -> failwith "Cannot have both `entity` and `set` operations in an `update` expression."
-            | None, [] -> failwith "Either an `entity` or `set` operations must be present in an `update` expression."
+            | None, [] when spec.RawSetValues.IsEmpty ->
+                failwith "Either an `entity`, `set`, or `setRaw` operation must be present in an `update` expression."
             | None, setValues -> setValues
 
         {
             Table = spec.Table
             SetColumns = kvps
-            SetRaws = []
+            SetRaws = spec.RawSetValues
             Where = spec.Where
             OutputFields = spec.OutputFields
-            Returning = []
+            Returning = spec.Returning
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
@@ -215,14 +222,26 @@ module internal QueryUtils =
                 FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
                 |> Array.filter (fun p -> included.Contains(p.Name))
 
-        match spec.Entities with
-        | [] ->
-            failwith "At least one `entity` or `entities` must be set in the `insert` builder."
+        let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
 
-        | entities ->
+        match spec.FromSelect, spec.Entities with
+        | Some selectIR, _ ->
+            // INSERT INTO ... (cols) <select-subquery>
+            {
+                Table = spec.Table
+                Columns = columns
+                Rows = []
+                FromSelect = Some selectIR
+                IdentityField = spec.IdentityField
+                InsertType = spec.InsertType
+                OutputFields = spec.OutputFields
+                Returning = spec.Returning
+            }
+        | None, [] ->
+            failwith "At least one `entity` or `entities` must be set in the `insert` builder."
+        | None, entities ->
             if spec.IdentityField.IsSome && entities.Length > 1
             then failwith "`getId` is not currently supported for multiple inserts via the `entities` operation."
-            let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
             let rows =
                 entities
                 |> List.map (fun entity ->
@@ -237,7 +256,7 @@ module internal QueryUtils =
                 IdentityField = spec.IdentityField
                 InsertType = spec.InsertType
                 OutputFields = spec.OutputFields
-                Returning = []
+                Returning = spec.Returning
             }
 
     /// Fails if `getId` identity field is used as an `onConflict` target.

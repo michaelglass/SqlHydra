@@ -120,7 +120,12 @@ type SelectBuilder<'Selected, 'Mapped> () =
 
         match tblMaybe with
         | Some tbl ->
-            QuerySource<'T, SelectQueryIR>({ ir with From = Some $"{tbl.Schema}.{tbl.Name} as {tableAlias}" }, tableMappings)
+            // Schema = "" means this is a CTE reference (no schema prefix).
+            let fromSpec =
+                if tbl.Schema = ""
+                then $"{tbl.Name} as {tableAlias}"
+                else $"{tbl.Schema}.{tbl.Name} as {tableAlias}"
+            QuerySource<'T, SelectQueryIR>({ ir with From = Some fromSpec }, tableMappings)
         | None ->
             // Handles this scenario: `select (p.FirstName, p.LastName) into (fname, lname)`
             state :?> QuerySource<'T, SelectQueryIR>
@@ -139,6 +144,32 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let tableMappings = state.TableMappings |> Map.values
         let newClause = LinqExpressionVisitors.visitWhere<'T> tableMappings whereExpression qualifyColumnWithAlias
         QuerySource<'T, SelectQueryIR>({ ir with Where = WhereClause.combineAnd ir.Where newClause }, state.TableMappings)
+
+    /// WHERE EXISTS (subquery)
+    [<CustomOperation("whereExists", MaintainsVariableSpace = true)>]
+    member this.WhereExists (state: QuerySource<'T, SelectQueryIR>, subquery: SelectQuery) =
+        let ir = state.Query
+        let newClause = WhereClause.Exists subquery.SelectIR
+        QuerySource<'T, SelectQueryIR>({ ir with Where = WhereClause.combineAnd ir.Where newClause }, state.TableMappings)
+
+    /// WHERE NOT EXISTS (subquery)
+    [<CustomOperation("whereNotExists", MaintainsVariableSpace = true)>]
+    member this.WhereNotExists (state: QuerySource<'T, SelectQueryIR>, subquery: SelectQuery) =
+        let ir = state.Query
+        let newClause = WhereClause.NotExists subquery.SelectIR
+        QuerySource<'T, SelectQueryIR>({ ir with Where = WhereClause.combineAnd ir.Where newClause }, state.TableMappings)
+
+    /// HAVING with raw SQL fragment. Use ? for parameter placeholders.
+    [<CustomOperation("havingRaw", MaintainsVariableSpace = true)>]
+    member this.HavingRaw (state: QuerySource<'T, SelectQueryIR>, fragment: string) =
+        let ir = state.Query
+        QuerySource<'T, SelectQueryIR>({ ir with Having = WhereClause.combineAnd ir.Having (RawWhere(fragment, [||])) }, state.TableMappings)
+
+    /// HAVING with raw SQL fragment + parameters. Use ? as placeholders.
+    [<CustomOperation("havingRaw", MaintainsVariableSpace = true)>]
+    member this.HavingRaw (state: QuerySource<'T, SelectQueryIR>, fragment: string, parameters: obj[]) =
+        let ir = state.Query
+        QuerySource<'T, SelectQueryIR>({ ir with Having = WhereClause.combineAnd ir.Having (RawWhere(fragment, parameters)) }, state.TableMappings)
 
     /// Sets the SELECT statement and filters the query to include only the selected tables
     [<CustomOperation("select", MaintainsVariableSpace = true, AllowIntoPattern = true)>]
@@ -206,6 +237,58 @@ type SelectBuilder<'Selected, 'Mapped> () =
     [<CustomOperation("thenByDescending", MaintainsVariableSpace = true)>]
     member this.ThenByDescending (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector) =
         this.OrderByDescending(state, propertySelector)
+
+    /// ORDER BY a raw SQL fragment (e.g. an aggregate or computed expression).
+    [<CustomOperation("orderByRaw", MaintainsVariableSpace = true)>]
+    member this.OrderByRaw (state: QuerySource<'T, SelectQueryIR>, fragment: string) =
+        let ir = state.Query
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw fragment] }, state.TableMappings)
+
+    /// ORDER BY a column alias (raw, quoted). Use for computed/aliased columns produced in select.
+    [<CustomOperation("orderByAlias", MaintainsVariableSpace = true)>]
+    member this.OrderByAlias (state: QuerySource<'T, SelectQueryIR>, alias: string) =
+        let ir = state.Query
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw $"\"{alias}\""] }, state.TableMappings)
+
+    /// ORDER BY a column alias DESC (raw, quoted).
+    [<CustomOperation("orderByAliasDesc", MaintainsVariableSpace = true)>]
+    member this.OrderByAliasDesc (state: QuerySource<'T, SelectQueryIR>, alias: string) =
+        let ir = state.Query
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw $"\"{alias}\" DESC"] }, state.TableMappings)
+
+    /// Adds NULLS LAST to the most recent ORDER BY clause.
+    [<CustomOperation("nullsLast", MaintainsVariableSpace = true)>]
+    member this.NullsLast (state: QuerySource<'T, SelectQueryIR>) =
+        let ir = state.Query
+        let newOrderBy =
+            match List.tryLast ir.OrderBy with
+            | Some last ->
+                let init = ir.OrderBy.[0..ir.OrderBy.Length - 2]
+                let updated =
+                    match last with
+                    | OrderByColumn (col, dir) -> OrderByColumnNulls (col, dir, NullsLast)
+                    | OrderByColumnNulls (col, dir, _) -> OrderByColumnNulls (col, dir, NullsLast)
+                    | OrderByRaw frag -> OrderByRaw $"{frag} NULLS LAST"
+                init @ [updated]
+            | None -> ir.OrderBy
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = newOrderBy }, state.TableMappings)
+
+    /// Adds NULLS FIRST to the most recent ORDER BY clause.
+    [<CustomOperation("nullsFirst", MaintainsVariableSpace = true)>]
+    member this.NullsFirst (state: QuerySource<'T, SelectQueryIR>) =
+        let ir = state.Query
+        let newOrderBy =
+            match List.tryLast ir.OrderBy with
+            | Some last ->
+                let init = ir.OrderBy.[0..ir.OrderBy.Length - 2]
+                let updated =
+                    match last with
+                    | OrderByColumn (col, dir) -> OrderByColumnNulls (col, dir, NullsFirst)
+                    | OrderByColumnNulls (col, dir, _) -> OrderByColumnNulls (col, dir, NullsFirst)
+                    | OrderByRaw frag -> OrderByRaw $"{frag} NULLS FIRST"
+                init @ [updated]
+            | None -> ir.OrderBy
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = newOrderBy }, state.TableMappings)
 
     /// Sets the SKIP value for query
     [<CustomOperation("skip", MaintainsVariableSpace = true)>]
