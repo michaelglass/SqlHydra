@@ -504,28 +504,41 @@ let visitAlias (exp: Expression) =
 let private compileAndEval (e: Expression) =
     System.Linq.Expressions.Expression.Lambda(e).Compile().DynamicInvoke()
 
+let private inv = System.Globalization.CultureInfo.InvariantCulture
+
+let private isNullaryDU (t: System.Type) =
+    FSharp.Reflection.FSharpType.IsUnion(t)
+    && FSharp.Reflection.FSharpType.GetUnionCases(t) |> Array.forall (fun c -> c.GetFields().Length = 0)
+
+let private formatFloat (s: string) =
+    if s.Contains(".") || s.Contains("e") || s.Contains("E") then s else s + ".0"
+
 /// Formats a numeric constant as SQL literal, preserving the type's decimal form for floats.
 /// `1.0` (double) → "1.0", not "1" (which Postgres types as integer and breaks `1.0 - <vector>` queries).
-/// Enums are quoted as their string name (Postgres treats unknown bare identifiers as columns).
+/// Enums and nullary DUs are quoted as their string name — Postgres treats bare identifiers as columns.
 let private formatNumericLiteral (value: obj) (clrType: System.Type) =
-    let inv = System.Globalization.CultureInfo.InvariantCulture
-    if clrType = typeof<float> || clrType = typeof<double> then
-        let v = value :?> double
-        let s = v.ToString("R", inv)
-        if s.Contains(".") || s.Contains("e") || s.Contains("E") then s else s + ".0"
-    elif clrType = typeof<single> || clrType = typeof<float32> then
-        let v = value :?> single
-        let s = v.ToString("R", inv)
-        if s.Contains(".") || s.Contains("e") || s.Contains("E") then s else s + ".0"
-    elif clrType = typeof<decimal> then
-        (value :?> decimal).ToString(inv)
-    elif clrType.IsEnum
-         || (FSharp.Reflection.FSharpType.IsUnion(clrType)
-             && FSharp.Reflection.FSharpType.GetUnionCases(clrType) |> Array.forall (fun c -> c.GetFields().Length = 0)) then
-        // C# enum or F# DU with all nullary cases — render its name as a string literal.
-        $"'{value}'"
-    else
-        sprintf "%O" value
+    match clrType with
+    | t when t = typeof<float> || t = typeof<double> -> (value :?> double).ToString("R", inv) |> formatFloat
+    | t when t = typeof<single> || t = typeof<float32> -> (value :?> single).ToString("R", inv) |> formatFloat
+    | t when t = typeof<decimal> -> (value :?> decimal).ToString(inv)
+    | t when t.IsEnum || isNullaryDU t -> $"'{value}'"
+    | _ -> sprintf "%O" value
+
+/// Renders an evaluated runtime value as a SQL literal fragment.
+/// Used for `inlineValue` and static-field references (Guid.Empty, DateTime.MinValue, etc.).
+let private renderObjAsLiteral (v: obj) =
+    match v with
+    | null -> "NULL"
+    | :? string as s -> $"'{s}'"
+    | :? bool as b -> if b then "TRUE" else "FALSE"
+    | :? System.Guid as g -> $"'{g}'"
+    | :? System.DateTime as dt ->
+        let s = dt.ToString("yyyy-MM-dd HH:mm:ss", inv)
+        $"'{s}'"
+    | :? System.DateTimeOffset as dto ->
+        let s = dto.ToString("yyyy-MM-dd HH:mm:sszzz", inv)
+        $"'{s}'"
+    | _ -> formatNumericLiteral v (v.GetType())
 
 /// Converts a SQL function MethodCall expression to a SQL fragment string.
 /// Also renders argument expressions when called recursively as the entry point for
@@ -542,38 +555,12 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
             renderExpr u.Operand
         // inlineValue marker: compile-and-eval the inner expression and emit as a literal.
         | MethodCall m when m.Method.Name = nameof inlineValue && m.Arguments.Count = 1 ->
-            let inv = System.Globalization.CultureInfo.InvariantCulture
-            match compileAndEval m.Arguments.[0] with
-            | null -> "NULL"
-            | :? string as s -> $"'{s}'"
-            | :? bool as b -> if b then "TRUE" else "FALSE"
-            | :? System.DateTime as dt ->
-                let s = dt.ToString("yyyy-MM-dd HH:mm:ss", inv)
-                $"'{s}'"
-            | :? System.DateTimeOffset as dto ->
-                let s = dto.ToString("yyyy-MM-dd HH:mm:sszzz", inv)
-                $"'{s}'"
-            | :? System.Guid as g -> $"'{g}'"
-            | v -> formatNumericLiteral v (v.GetType())
+            renderObjAsLiteral (compileAndEval m.Arguments.[0])
         | Member mem when mem.Expression <> null ->
             let alias = visitAlias mem.Expression
             qualifyColumn alias mem.Member
-        | Member mem ->
-            // Static fields have null .Expression (e.g. Guid.Empty, DateTime.MinValue, String.Empty).
-            // Evaluate at compile time and inline as a SQL literal.
-            let inv = System.Globalization.CultureInfo.InvariantCulture
-            match compileAndEval mem with
-            | null -> "NULL"
-            | :? string as s -> $"'{s}'"
-            | :? bool as b -> if b then "TRUE" else "FALSE"
-            | :? System.Guid as g -> $"'{g}'"
-            | :? System.DateTime as dt ->
-                let s = dt.ToString("yyyy-MM-dd HH:mm:ss", inv)
-                $"'{s}'"
-            | :? System.DateTimeOffset as dto ->
-                let s = dto.ToString("yyyy-MM-dd HH:mm:sszzz", inv)
-                $"'{s}'"
-            | v -> formatNumericLiteral v (v.GetType())
+        // Static fields (Guid.Empty, DateTime.MinValue, String.Empty) — null .Expression.
+        | Member mem -> renderObjAsLiteral (compileAndEval mem)
         | Constant c when c.Value = null -> "NULL"
         | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
         | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
@@ -1594,11 +1581,10 @@ let private renderSelectExpression (exp: Expression) : string * obj[] =
             let aggType = mc.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             renderAggregate aggType (render mc.Arguments.[0])
         | :? MethodCallExpression as mc ->
-            // Delegate to visitSqlFn for caseWhen/castAs/coalesce/etc. — it already
-            // knows how to render F# query DSL methods to SQL. Fall back to a generic
-            // "name(args)" form only if visitSqlFn rejects the shape.
+            // Delegate to visitSqlFn for caseWhen/castAs/coalesce/etc. Fall back to a
+            // generic "name(args)" form only if visitSqlFn explicitly rejects the shape.
             try visitSqlFn qualifyColumn (mc :> Expression)
-            with _ ->
+            with :? System.NotImplementedException ->
                 let args = mc.Arguments |> Seq.map render |> String.concat ", "
                 $"{mc.Method.Name}({args})"
         | _ ->
