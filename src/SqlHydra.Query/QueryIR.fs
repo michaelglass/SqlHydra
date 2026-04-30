@@ -35,6 +35,7 @@ type NullsOrdering =
     | NullsLast
 
 /// An ORDER BY clause.
+[<NoComparison>]
 type OrderByClause =
     | OrderByColumn of column: string * direction: OrderDirection
     /// ORDER BY column with explicit NULLS FIRST/LAST.
@@ -44,6 +45,7 @@ type OrderByClause =
     | OrderByRaw of fragment: string * parameters: obj[]
 
 /// A SELECT column.
+[<NoComparison>]
 type SelectColumn =
     /// Select all columns from a table alias: alias.*
     | AllColumns of tableAlias: string
@@ -57,6 +59,7 @@ type SelectColumn =
 // SqlValue, WhereClause, JoinClause, and SelectQueryIR reference each other.
 
 /// A SQL expression value (right-hand side of a comparison).
+[<NoComparison>]
 type SqlValue =
     /// A parameter value (may be a QueryParameter wrapping provider type info)
     | Parameter of value: obj
@@ -70,7 +73,7 @@ type SqlValue =
     | RawSql of fragment: string * parameters: obj[]
 
 /// A predicate in a WHERE, HAVING, or JOIN ON clause.
-and WhereClause =
+and [<NoComparison>] WhereClause =
     /// column op value (e.g., a.City = @p0)
     | Compare of column: string * op: ComparisonOp * value: SqlValue
     /// column op column (e.g., a.Id = b.Id)
@@ -109,7 +112,7 @@ and WhereClause =
     | Empty
 
 /// A JOIN clause.
-and JoinClause = {
+and [<NoComparison>] JoinClause = {
     Kind: JoinKind
     /// Table spec string, e.g. "Sales.SalesOrderDetail AS d", or the alias when Subquery is Some.
     Table: string
@@ -120,7 +123,7 @@ and JoinClause = {
 }
 
 /// The complete SELECT query IR.
-and SelectQueryIR = {
+and [<NoComparison>] SelectQueryIR = {
     /// CTEs to render before SELECT: WITH alias AS (...).
     WithCtes: (string * SelectQueryIR) list
     /// Table spec: "Schema.Table as alias" or "Schema.Table"
@@ -189,12 +192,14 @@ module SelectQueryIR =
 // ─── Insert-related types ───
 
 /// SET clause for UPDATE: either a typed column-value pair, or a raw SQL fragment with parameters.
+[<NoComparison>]
 type SetClause =
     /// SET col = @p
     | SetColumn of column: string * value: obj
     /// SET col = <fragment>; fragment may use `?` placeholders that bind to parameters in order.
     | SetRaw of column: string * fragment: string * parameters: obj[]
 
+[<NoComparison>]
 type InsertType =
     | Insert
     | InsertOrReplace
@@ -213,6 +218,7 @@ type Nullability =
     | IsNullable
     | NotNullable
 
+[<NoComparison>]
 type OutputField =
     {
         ColumnName: string
@@ -221,6 +227,7 @@ type OutputField =
     }
 
 /// INSERT query IR.
+[<NoComparison>]
 type InsertQueryIR = {
     Table: string
     Columns: string list
@@ -236,6 +243,7 @@ type InsertQueryIR = {
 }
 
 /// UPDATE query IR.
+[<NoComparison>]
 type UpdateQueryIR = {
     Table: string
     /// Column name * parameter value pairs
@@ -249,6 +257,7 @@ type UpdateQueryIR = {
 }
 
 /// DELETE query IR.
+[<NoComparison>]
 type DeleteQueryIR = {
     Table: string
     Where: WhereClause
