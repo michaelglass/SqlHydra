@@ -193,6 +193,14 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     { ir with Select = ir.Select @ [RawColumn (sqlFragment, [||])] }
                 | LinqExpressionVisitors.SelectedExpressionWithParams (sqlFragment, parms) ->
                     { ir with Select = ir.Select @ [RawColumn (sqlFragment, parms)] }
+                | LinqExpressionVisitors.SelectedAs (LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _), alias) ->
+                    { ir with Select = ir.Select @ [RawColumn ($"\"%s{tableAlias}\".\"%s{column}\" AS \"%s{alias}\"", [||])] }
+                | LinqExpressionVisitors.SelectedAs (LinqExpressionVisitors.SelectedExpression frag, alias) ->
+                    { ir with Select = ir.Select @ [RawColumn ($"%s{frag} AS \"%s{alias}\"", [||])] }
+                | LinqExpressionVisitors.SelectedAs (LinqExpressionVisitors.SelectedExpressionWithParams (frag, parms), alias) ->
+                    { ir with Select = ir.Select @ [RawColumn ($"%s{frag} AS \"%s{alias}\"", parms)] }
+                | LinqExpressionVisitors.SelectedAs _ ->
+                    failwith "SelectedAs may only wrap SelectedColumn / SelectedExpression / SelectedExpressionWithParams"
             ) state.Query
 
         QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)

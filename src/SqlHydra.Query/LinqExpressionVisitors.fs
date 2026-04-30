@@ -1260,6 +1260,9 @@ type Selection =
     /// Select projection with bound parameters (e.g. `1.0 - cosine_distance(col, inlineValue v)`).
     /// Fragment uses `?` placeholders that the emitter binds in order.
     | SelectedExpressionWithParams of sqlFragment: string * parameters: obj[]
+    /// Selection with an explicit `AS "alias"` (anonymous-record field name).
+    /// Wraps any of the above; the inner Selection is rendered, then the alias appended.
+    | SelectedAs of inner: Selection * alias: string
 
 
 /// Visits a join predicate expression and builds a WhereClause for the JOIN ON condition.
@@ -1317,7 +1320,31 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
                     let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
                     Compare(fqCol, reversedOp, Parameter queryParameter)
 
-            // Nullable.Value / Option.Value comparisons
+            // Option.Value / Nullable.Value column compared to another column → CompareColumns.
+            | NColumn (p, ext), NColumn (p2, _) when ext = ExtProperty.Value ->
+                let alias1 = visitAlias p.Expression
+                let m1 = tryGetMember p
+                let lt = qualifyColumn alias1 m1.Value.Member
+                let alias2 = visitAlias p2.Expression
+                let rt = qualifyColumn alias2 p2.Member
+                CompareColumns(lt, compOp, rt)
+            | NColumn (p1, _), NColumn (p2, ext2) when ext2 = ExtProperty.Value ->
+                let alias1 = visitAlias p1.Expression
+                let lt = qualifyColumn alias1 p1.Member
+                let alias2 = visitAlias p2.Expression
+                let m2 = tryGetMember p2
+                let rt = qualifyColumn alias2 m2.Value.Member
+                CompareColumns(lt, compOp, rt)
+            // Both sides Value-wrapped (e.g. left.Value.x = right.Value.y)
+            | NColumn (p1, ext1), NColumn (p2, ext2) when ext1 = ExtProperty.Value && ext2 = ExtProperty.Value ->
+                let alias1 = visitAlias p1.Expression
+                let m1 = tryGetMember p1
+                let lt = qualifyColumn alias1 m1.Value.Member
+                let alias2 = visitAlias p2.Expression
+                let m2 = tryGetMember p2
+                let rt = qualifyColumn alias2 m2.Value.Member
+                CompareColumns(lt, compOp, rt)
+            // Nullable.Value / Option.Value column compared to a value (compile-eval'd if needed).
             | NColumn (p, ext), _ when ext = ExtProperty.Value ->
                 let value =
                     match right with
@@ -1519,17 +1546,33 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
             [ SelectedExpression sqlFragment ]
         | NNew(newExpr, args) ->
             // Each anonymous-record / tuple / DU field initializer is one Selection.
+            // newExpr.Members carries the member info for each constructor arg, which gives us
+            // the F# field name to use as a SQL `AS "alias"` so the consumer reader can read by
+            // field name rather than the underlying column name.
             // Binary, Unary, and inlineValue-bearing initializers fall through to the
             // expression-walker that emits SelectedExpressionWithParams.
+            let memberNames =
+                if newExpr.Members <> null && newExpr.Members.Count = args.Length then
+                    newExpr.Members |> Seq.map (fun m -> Some m.Name) |> Seq.toList
+                else
+                    args |> List.map (fun _ -> None)
             args
-            |> List.mapi (fun i nargs -> i, nargs)
-            |> List.collect (fun (i, narg) ->
-                match narg with
-                | NMethodCall _ | NAggregateColumn _ | NMemberAccess _ | NParameter _ | NNew _ ->
-                    visit narg
-                | _ ->
-                    let frag, parms = renderSelectExpression newExpr.Arguments.[i]
-                    [ SelectedExpressionWithParams (frag, parms) ])
+            |> List.mapi (fun i nargs -> i, nargs, memberNames.[i])
+            |> List.collect (fun (i, narg, fieldName) ->
+                let inner =
+                    match narg with
+                    | NMethodCall _ | NAggregateColumn _ | NMemberAccess _ | NParameter _ | NNew _ ->
+                        visit narg
+                    | _ ->
+                        let frag, parms = renderSelectExpression newExpr.Arguments.[i]
+                        [ SelectedExpressionWithParams (frag, parms) ]
+                // Wrap with SelectedAs only when the field name differs from the underlying column.
+                match fieldName, inner with
+                | Some fname, [ SelectedColumn (_, col, _, _, _) as sel ] when fname <> col ->
+                    [ SelectedAs (sel, fname) ]
+                | Some fname, [ (SelectedExpression _ | SelectedExpressionWithParams _) as sel ] ->
+                    [ SelectedAs (sel, fname) ]
+                | _ -> inner)
         | NParameter p ->
             [ SelectedTable (p.Name, p.Type) ]
         | NMemberAccess(inner, m) ->
