@@ -269,6 +269,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     | OrderByColumn (col, dir) -> OrderByColumnNulls (col, dir, NullsLast)
                     | OrderByColumnNulls (col, dir, _) -> OrderByColumnNulls (col, dir, NullsLast)
                     | OrderByRaw frag -> OrderByRaw $"{frag} NULLS LAST"
+                    | OrderByRawWithParams (frag, parms) -> OrderByRawWithParams ($"{frag} NULLS LAST", parms)
                 init @ [updated]
             | None -> ir.OrderBy
         QuerySource<'T, SelectQueryIR>({ ir with OrderBy = newOrderBy }, state.TableMappings)
@@ -286,6 +287,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     | OrderByColumn (col, dir) -> OrderByColumnNulls (col, dir, NullsFirst)
                     | OrderByColumnNulls (col, dir, _) -> OrderByColumnNulls (col, dir, NullsFirst)
                     | OrderByRaw frag -> OrderByRaw $"{frag} NULLS FIRST"
+                    | OrderByRawWithParams (frag, parms) -> OrderByRawWithParams ($"{frag} NULLS FIRST", parms)
                 init @ [updated]
             | None -> ir.OrderBy
         QuerySource<'T, SelectQueryIR>({ ir with OrderBy = newOrderBy }, state.TableMappings)

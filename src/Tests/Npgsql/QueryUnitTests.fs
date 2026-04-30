@@ -1020,3 +1020,51 @@ let ``Phase4: orderByCosineDistance emits ORDER BY ... <=> ?`` () =
         |> toSql
     sql.Contains("ORDER BY") =! true
     sql.Contains("<=>") =! true
+
+[<Test>]
+let ``Phase4: orderByCosineDistance binds vector as a parameter`` () =
+    let vector = [| 0.1f; 0.2f; 0.3f |]
+    let q =
+        select {
+            for p in production.product do
+            orderByCosineDistance p.standardcost (box vector)
+        }
+    let emitter = SqlHydra.Query.PostgresEmitter() :> SqlHydra.Query.ISqlEmitter
+    let compiled = q.CompileWith(emitter)
+    // SQL should reference @p0 (or similar) instead of a bare ?
+    compiled.Sql.Contains("<=>") =! true
+    compiled.Sql.Contains(" ?") =! false  // placeholder must be replaced
+    // Parameters list should contain the vector.
+    compiled.Parameters.Length =! 1
+    let (_, value) = compiled.Parameters.[0]
+    value =! (box vector)
+
+[<Test>]
+let ``Phase4: orderByL2Distance binds vector as a parameter`` () =
+    let vector = [| 0.5f; 0.5f |]
+    let q =
+        select {
+            for p in production.product do
+            orderByL2Distance p.standardcost (box vector)
+        }
+    let emitter = SqlHydra.Query.PostgresEmitter() :> SqlHydra.Query.ISqlEmitter
+    let compiled = q.CompileWith(emitter)
+    compiled.Sql.Contains("<->") =! true
+    compiled.Parameters.Length =! 1
+    let (_, value) = compiled.Parameters.[0]
+    value =! (box vector)
+
+[<Test>]
+let ``Phase4: orderByCosineDistance + nullsLast retains parameter binding`` () =
+    let vector = [| 1.0f; 2.0f |]
+    let q =
+        select {
+            for p in production.product do
+            orderByCosineDistance p.standardcost (box vector)
+            nullsLast
+        }
+    let emitter = SqlHydra.Query.PostgresEmitter() :> SqlHydra.Query.ISqlEmitter
+    let compiled = q.CompileWith(emitter)
+    compiled.Sql.Contains("NULLS LAST") =! true
+    compiled.Sql.Contains("<=>") =! true
+    compiled.Parameters.Length =! 1

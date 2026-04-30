@@ -309,6 +309,14 @@ type SqlEmitterBase() =
                     | OrderByColumnNulls (col, Asc, nulls) -> $"{this.QuoteColumn(col)}{nullsSuffix nulls}"
                     | OrderByColumnNulls (col, Desc, nulls) -> $"{this.QuoteColumn(col)} DESC{nullsSuffix nulls}"
                     | OrderByRaw fragment -> this.QuoteRawFragment(fragment)
+                    | OrderByRawWithParams (fragment, parms) ->
+                        let mutable result = this.QuoteRawFragment(fragment)
+                        for p in parms do
+                            let name = collector.Add(p)
+                            let idx = result.IndexOf("?")
+                            if idx >= 0 then
+                                result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
+                        result
                 )
                 |> String.concat ", "
             sb.Append($" ORDER BY {orderCols}") |> ignore

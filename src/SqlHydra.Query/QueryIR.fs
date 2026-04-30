@@ -40,6 +40,9 @@ type OrderByClause =
     /// ORDER BY column with explicit NULLS FIRST/LAST.
     | OrderByColumnNulls of column: string * direction: OrderDirection * nulls: NullsOrdering
     | OrderByRaw of fragment: string
+    /// ORDER BY raw fragment with bound parameters. `?` placeholders are replaced by parameter
+    /// names in order. Used by pgvector distance ordering and similar parameterized expressions.
+    | OrderByRawWithParams of fragment: string * parameters: obj[]
 
 /// A SELECT column.
 type SelectColumn =
