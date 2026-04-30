@@ -30,36 +30,29 @@ type PgvectorFn =
 /// pgvector-specific extensions for the select builder.
 type SelectBuilder<'Selected, 'Mapped> with
 
-    member private this.OrderByVectorDistance (state: QuerySource<'T, SelectQueryIR>, propertySelector, operator: string) =
+    member private this.OrderByVectorDistance (state: QuerySource<'T, SelectQueryIR>, propertySelector, operator: string, vector: obj) =
         let result = LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
         match result with
         | LinqExpressionVisitors.OrderByColumn (tableAlias, p) ->
             let fqCol = $"\"{tableAlias}\".\"{p.Name}\""
-            // Caller must have already registered the right-hand vector via inlineValue or similar.
-            // For raw vector ordering, we add an OrderByRaw fragment; param threading is done by callers
-            // through the Postgres pgvector parameter binding.
             QuerySource<'T, SelectQueryIR>(
-                { state.Query with OrderBy = state.Query.OrderBy @ [OrderByRaw $"{fqCol} {operator} ?"] },
+                { state.Query with
+                    OrderBy = state.Query.OrderBy @ [OrderByRawWithParams ($"{fqCol} {operator} ?", [| vector |])] },
                 state.TableMappings)
         | LinqExpressionVisitors.OrderByIgnored -> state
         | _ -> failwith "pgvector distance ordering requires a column reference, not an aggregate"
 
     /// ORDER BY column <=> @vector (pgvector cosine distance, ascending — closest first).
-    /// Note: the vector parameter is currently emitted as a `?` placeholder; bind via a downstream
-    /// parameter substitution path.
     [<CustomOperation("orderByCosineDistance", MaintainsVariableSpace = true)>]
     member this.OrderByCosineDistance (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector: Expression<Func<'T, 'Prop>>, vector: obj) =
-        ignore vector
-        this.OrderByVectorDistance(state, propertySelector, "<=>")
+        this.OrderByVectorDistance(state, propertySelector, "<=>", vector)
 
     /// ORDER BY column <-> @vector (pgvector L2/Euclidean distance, ascending — closest first).
     [<CustomOperation("orderByL2Distance", MaintainsVariableSpace = true)>]
     member this.OrderByL2Distance (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector: Expression<Func<'T, 'Prop>>, vector: obj) =
-        ignore vector
-        this.OrderByVectorDistance(state, propertySelector, "<->")
+        this.OrderByVectorDistance(state, propertySelector, "<->", vector)
 
     /// ORDER BY column <#> @vector (pgvector inner product distance, ascending).
     [<CustomOperation("orderByInnerProductDistance", MaintainsVariableSpace = true)>]
     member this.OrderByInnerProductDistance (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector: Expression<Func<'T, 'Prop>>, vector: obj) =
-        ignore vector
-        this.OrderByVectorDistance(state, propertySelector, "<#>")
+        this.OrderByVectorDistance(state, propertySelector, "<#>", vector)
