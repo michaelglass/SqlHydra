@@ -1087,6 +1087,7 @@ let visitPropertiesSelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'P
 
     visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
 
+[<NoComparison>]
 type OrderBy =
     | OrderByColumn of tableAlias: string * MemberInfo
     | OrderByAggregateColumn of aggregateType: string * tableAlias: string * MemberInfo
@@ -1123,7 +1124,8 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
 
     visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
 
-type JoinedPropertyInfo = 
+[<NoComparison>]
+type JoinedPropertyInfo =
     {
         Alias: string
         Member: MemberInfo
@@ -1164,6 +1166,7 @@ let visitPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Pro
 
     visit (ExpressionNormalizer.toNormalizedExpression (propertySelector :> Expression))
 
+[<NoComparison>]
 type Selection =
     | SelectedTable of tableAlias: string * tableType: Type
     | SelectedColumn of tableAlias: string * column: string * columnType: Type * isOpt: bool * isNullable: bool
