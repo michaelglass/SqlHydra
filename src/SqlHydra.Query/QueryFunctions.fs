@@ -1,13 +1,27 @@
 ﻿namespace SqlHydra.Query
 
 [<AutoOpen>]
-module Table = 
+module Table =
 
     /// Maps the entity 'T to a table of the exact same name.
-    let table<'T> = 
+    let table<'T> =
         let ent = typeof<'T>
         let tables = Map [Root, { Name = ent.Name; Schema = ent.DeclaringType.Name}]
         QuerySource<'T>(tables)
+
+    /// Creates a CTE source: `WITH alias AS (innerQuery) SELECT ... FROM alias`.
+    /// The inner query's row type matches the outer 'T.
+    let cte<'T> (alias: string) (innerQuery: SelectQuery<'T>) : QuerySource<'T> =
+        let tables = Map [Root, { Name = alias; Schema = "" }]
+        let ir = { SelectQueryIR.empty with WithCtes = [(alias, innerQuery.SelectIR)] }
+        QuerySource<'T, SelectQueryIR>(ir, tables) :> QuerySource<'T>
+
+    /// Creates a CTE source where the outer 'T may differ from the inner select's row type.
+    /// Use when the inner query uses raw SELECT fragments for computed columns.
+    let cteFrom<'T> (alias: string) (innerQuery: SelectQuery) : QuerySource<'T> =
+        let tables = Map [Root, { Name = alias; Schema = "" }]
+        let ir = { SelectQueryIR.empty with WithCtes = [(alias, innerQuery.SelectIR)] }
+        QuerySource<'T, SelectQueryIR>(ir, tables) :> QuerySource<'T>
 
 [<AutoOpen>]
 module Where = 

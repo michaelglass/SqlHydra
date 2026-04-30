@@ -81,11 +81,69 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
 
     /// Insert is ignored if a conflict occurs.
     [<CustomOperation("onConflictDoNothing", MaintainsVariableSpace = true)>]
-    member this.OnConflictDoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>, 
-        [<ProjectionParameter>] conflictFields) = 
-        
+    member this.OnConflictDoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFields) =
+
         let spec = state.Query
         let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun tblAlias p -> p.Name)
         let newSpec = { spec with InsertType = OnConflictDoNothing conflictFields }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+    /// ON CONFLICT (cols) DO UPDATE SET col = COALESCE(EXCLUDED.col, table.col).
+    /// Preserves existing non-null values rather than overwriting with NULL.
+    [<CustomOperation("onConflictDoUpdateCoalesce", MaintainsVariableSpace = true)>]
+    member this.OnConflictDoUpdateCoalesce(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFields,
+        [<ProjectionParameter>] updateFields) =
+        let spec = state.Query
+        let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun _ p -> p.Name)
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun _ p -> p.Name)
+        let newSpec = { spec with InsertType = OnConflictDoUpdateCoalesce (conflictFields, updateFields) }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+    /// ON CONFLICT (cols) WHERE <whereFragment> DO NOTHING — for partial-index conflicts.
+    /// Use ? as parameter placeholders in the where fragment.
+    [<CustomOperation("onConflictDoNothingWhereRaw", MaintainsVariableSpace = true)>]
+    member this.OnConflictDoNothingWhereRaw(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFields,
+        whereFragment: string,
+        parameters: obj[]) =
+        let spec = state.Query
+        let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun _ p -> p.Name)
+        let newSpec = { spec with InsertType = OnConflictDoNothingWhereRaw (conflictFields, whereFragment, parameters) }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+    /// ON CONFLICT (<rawTargetExpr>) DO NOTHING — for expression indexes (e.g., lower(email)).
+    [<CustomOperation("onConflictDoNothingRawTarget", MaintainsVariableSpace = true)>]
+    member this.OnConflictDoNothingRawTarget(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        rawTargetExpr: string) =
+        let spec = state.Query
+        let newSpec = { spec with InsertType = OnConflictDoNothingRawTarget rawTargetExpr }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+type SelectBuilder<'Selected, 'Mapped> with
+
+    /// Adds DISTINCT ON (col) — PostgreSQL-only. Mutually exclusive with `distinct`.
+    /// Multiple `distinctOn` calls accumulate columns.
+    [<CustomOperation("distinctOn", MaintainsVariableSpace = true)>]
+    member this.DistinctOn (state: QuerySource<'T, SelectQueryIR>, [<ProjectionParameter>] propertySelector: System.Linq.Expressions.Expression<Func<'T, 'Prop>>) =
+        let ir = state.Query
+        let column =
+            LinqExpressionVisitors.visitOrderByPropertySelector<'T, 'Prop> propertySelector
+            |> function
+                | LinqExpressionVisitors.OrderByColumn (alias, p) -> $"{alias}.{p.Name}"
+                | _ -> failwith "distinctOn requires a simple column selector."
+        QuerySource<'T, SelectQueryIR>({ ir with DistinctOn = ir.DistinctOn @ [column] }, state.TableMappings)
+
+    /// LEFT JOIN LATERAL (subquery) AS alias ON true. PostgreSQL-only.
+    /// The subquery is built with its own select { ... } and may correlate to outer columns.
+    [<CustomOperation("lateralJoin", MaintainsVariableSpace = true)>]
+    member this.LateralJoin (state: QuerySource<'T, SelectQueryIR>, subquery: SelectQuery, alias: string) =
+        let ir = state.Query
+        let joinClause =
+            { Kind = LeftJoinLateral
+              Table = alias
+              Subquery = Some subquery.SelectIR
+              Condition = WhereClause.RawWhere("true", [||]) }
+        QuerySource<'T, SelectQueryIR>({ ir with Joins = ir.Joins @ [joinClause] }, state.TableMappings)
 
