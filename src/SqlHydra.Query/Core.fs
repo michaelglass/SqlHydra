@@ -45,6 +45,7 @@ module FQ =
 
 /// Represents a collection that must contain at least on item.
 module AtLeastOne =
+    [<NoComparison>]
     type AtLeastOne<'T> = private { Items : 'T seq }
 
     /// Returns Some if seq contains at least one item, else returns None.
@@ -57,6 +58,7 @@ module AtLeastOne =
         atLeastOne
 
 /// Wraps a query parameter to provide the generated ProviderDbType attribute value.
+[<NoComparison>]
 type QueryParameter =
     {
         Value: obj
@@ -68,6 +70,7 @@ type QueryParameter =
         | Some providerDbType -> $"%s{providerDbType}: {this.Value}"
         | None -> $"obj: {this.Value}"
 
+[<NoComparison>]
 type InsertQuerySpec<'T, 'Identity> =
     {
         Table: string
@@ -83,6 +86,7 @@ type InsertQuerySpec<'T, 'Identity> =
         { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []
           InsertType = Insert; Returning = []; FromSelect = None }
 
+[<NoComparison>]
 type UpdateQuerySpec<'T, 'UpdateReturn> =
     {
         Table: string
@@ -99,6 +103,7 @@ type UpdateQuerySpec<'T, 'UpdateReturn> =
         { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; RawSetValues = []
           Where = WhereClause.Empty; OutputFields = []; UpdateAll = false; Returning = [] }
 
+[<NoComparison>]
 type DeleteQuerySpec<'T> =
     {
         Table: string
