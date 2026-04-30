@@ -103,16 +103,20 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
         let newSpec = { spec with InsertType = OnConflictDoNothing conflictFields }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
 
-    /// ON CONFLICT (cols) DO UPDATE SET col = COALESCE(EXCLUDED.col, table.col).
-    /// Preserves existing non-null values rather than overwriting with NULL.
+    /// ON CONFLICT (cols) DO UPDATE SET — fields in `coalesceFields` get
+    /// `col = COALESCE(EXCLUDED.col, table.col)` (preserves existing non-null values
+    /// when the new value is NULL). Other fields use `col = EXCLUDED.col`.
+    /// `coalesceFields` should be a subset of `updateFields`.
     [<CustomOperation("onConflictDoUpdateCoalesce", MaintainsVariableSpace = true)>]
     member this.OnConflictDoUpdateCoalesce(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
         [<ProjectionParameter>] conflictFields,
-        [<ProjectionParameter>] updateFields) =
+        [<ProjectionParameter>] updateFields,
+        [<ProjectionParameter>] coalesceFields) =
         let spec = state.Query
         let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun _ p -> p.Name)
         let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun _ p -> p.Name)
-        let newSpec = { spec with InsertType = OnConflictDoUpdateCoalesce (conflictFields, updateFields) }
+        let coalesceFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'CoalesceProperties> coalesceFields (fun _ p -> p.Name)
+        let newSpec = { spec with InsertType = OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields) }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
 
     /// ON CONFLICT (cols) WHERE <whereFragment> DO NOTHING — for partial-index conflicts.
@@ -210,12 +214,16 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
             { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields); PendingConflict = None },
             state.TableMappings)
 
-    /// Conflict action: DO UPDATE SET col = COALESCE(EXCLUDED.col, table.col) for each update field.
+    /// Conflict action: DO UPDATE SET — `updateFields` are updated as `col = EXCLUDED.col`,
+    /// except those listed in `coalesceFields` which become `col = COALESCE(EXCLUDED.col, col)`.
+    /// `coalesceFields` should be a subset of `updateFields`.
     [<CustomOperation("doUpdateCoalesce", MaintainsVariableSpace = true)>]
     member this.DoUpdateCoalesce(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
-        [<ProjectionParameter>] updateFields) =
+        [<ProjectionParameter>] updateFields,
+        [<ProjectionParameter>] coalesceFields) =
         let spec = state.Query
         let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun _ p -> p.Name)
+        let coalesceFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'CoalesceProperties> coalesceFields (fun _ p -> p.Name)
         let conflictFields =
             match spec.PendingConflict with
             | Some (TypedConflictColumns (fields, None)) -> fields
@@ -223,7 +231,7 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
             | Some (RawConflictTarget _) -> failwith "doUpdateCoalesce requires a typed conflict target (use onConflict, not onConflictRaw)"
             | None -> failwith "doUpdateCoalesce requires onConflict to be called first"
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
-            { spec with InsertType = OnConflictDoUpdateCoalesce (conflictFields, updateFields); PendingConflict = None },
+            { spec with InsertType = OnConflictDoUpdateCoalesce (conflictFields, updateFields, coalesceFields); PendingConflict = None },
             state.TableMappings)
 
 type SelectBuilder<'Selected, 'Mapped> with

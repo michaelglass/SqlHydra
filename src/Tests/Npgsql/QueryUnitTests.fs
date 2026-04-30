@@ -793,7 +793,7 @@ let ``Phase2: onConflictDoUpdateCoalesce emits COALESCE expressions`` () =
         insert {
             for a in person.address do
             entity row
-            onConflictDoUpdateCoalesce a.addressid a.city
+            onConflictDoUpdateCoalesce a.addressid a.city a.city
         }
     let sql = toInsertSql q
     sql.Contains("ON CONFLICT(addressid) DO UPDATE SET") =! true

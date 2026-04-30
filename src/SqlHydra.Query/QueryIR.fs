@@ -204,8 +204,11 @@ type InsertType =
     | Insert
     | InsertOrReplace
     | OnConflictDoUpdate of conflictFields: string list * updateFields: string list
-    /// ON CONFLICT (cols) DO UPDATE SET col = COALESCE(EXCLUDED.col, table.col) — keeps existing non-null values.
-    | OnConflictDoUpdateCoalesce of conflictFields: string list * updateFields: string list
+    /// ON CONFLICT (cols) DO UPDATE SET — `updateFields` are updated as normal `col = EXCLUDED.col`,
+    /// except those listed in `coalesceFields` which become `col = COALESCE(EXCLUDED.col, col)`
+    /// (preserving existing non-null values when the new value is NULL).
+    /// `coalesceFields` should be a subset of `updateFields`.
+    | OnConflictDoUpdateCoalesce of conflictFields: string list * updateFields: string list * coalesceFields: string list
     | OnConflictDoNothing of conflictFields: string list
     /// ON CONFLICT (cols) WHERE <whereExpr> DO NOTHING — partial-index conflict handling.
     | OnConflictDoNothingWhereRaw of conflictFields: string list * whereFragment: string * parameters: obj[]
