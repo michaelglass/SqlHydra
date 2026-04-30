@@ -4,7 +4,12 @@ open System
 open Swensen.Unquote
 open SqlHydra.Query
 open SqlHydra.Query.NpgsqlExtensions
+open SqlHydra.Query.Pgvector.PgvectorExtensions
+open type SqlHydra.Query.Pgvector.PgvectorExtensions.PgvectorFn
 open NUnit.Framework
+
+// Ensure pgvector infix operators are registered before any tests run.
+do ensureRegistered ()
 open DB
 #if NET8_0
 open Npgsql.AdventureWorksNet8
@@ -968,3 +973,50 @@ let ``Phase3: nested aggregate-in-aggregate (MAX(SUM(x)))`` () =
         |> toSql
     sql.Contains("CAST(SUM(") =! true
     sql.Contains("AS FLOAT") =! true
+
+// ─── Phase 4: pgvector ───
+
+[<Test>]
+let ``Phase4: cosine_distance emits <=> infix in select`` () =
+    ensureRegistered ()
+    let sql =
+        select {
+            for p in production.product do
+            select (cosine_distance(p.standardcost, p.listprice))
+        }
+        |> toSql
+    sql.Contains("<=>") =! true
+
+[<Test>]
+let ``Phase4: l2_distance emits <-> infix in select`` () =
+    ensureRegistered ()
+    let sql =
+        select {
+            for p in production.product do
+            select (l2_distance(p.standardcost, p.listprice))
+        }
+        |> toSql
+    sql.Contains("<->") =! true
+
+[<Test>]
+let ``Phase4: inner_product_distance emits <#> infix in select`` () =
+    ensureRegistered ()
+    let sql =
+        select {
+            for p in production.product do
+            select (inner_product_distance(p.standardcost, p.listprice))
+        }
+        |> toSql
+    sql.Contains("<#>") =! true
+
+[<Test>]
+let ``Phase4: orderByCosineDistance emits ORDER BY ... <=> ?`` () =
+    let vector = [| 0.1f; 0.2f; 0.3f |]
+    let sql =
+        select {
+            for p in production.product do
+            orderByCosineDistance p.standardcost (box vector)
+        }
+        |> toSql
+    sql.Contains("ORDER BY") =! true
+    sql.Contains("<=>") =! true
