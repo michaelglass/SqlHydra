@@ -55,6 +55,24 @@ type SqlEmitterBase() =
     /// Creates a new ParameterCollector with this emitter's prefix.
     member this.CreateCollector() = ParameterCollector(this.ParameterPrefix)
 
+    /// Replaces `?` placeholders in `fragment` with parameter names from `collector`, in order.
+    /// Each `?` consumes one entry from `parms` (silently ignored if there are more parms than `?`s).
+    member _.SubstituteParams(fragment: string, parms: obj[], collector: ParameterCollector) =
+        let mutable result = fragment
+        for p in parms do
+            let name = collector.Add(p)
+            let idx = result.IndexOf("?")
+            if idx >= 0 then
+                result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
+        result
+
+    /// Splits an INSERT command into the insert-statement and an optional trailing identity-statement
+    /// produced by EmitInsertIdentity. Used by EmitInsertConflict to weave conflict clauses between them.
+    member _.SplitInsertAndIdentity(sql: string) =
+        match sql.Split([| ";" |], StringSplitOptions.RemoveEmptyEntries) with
+        | [| iq; idq |] -> iq, idq
+        | _ -> sql, ""
+
     /// Quotes a dotted identifier like "Schema.Table" to "[Schema].[Table]".
     member this.QuoteDotted(ident: string) =
         ident.Split('.')
@@ -99,13 +117,7 @@ type SqlEmitterBase() =
                 collector.Add(v) |> ignore
             $"({compiled.Sql})"
         | RawSql (fragment, parms) ->
-            let mutable result = fragment
-            for p in parms do
-                let name = collector.Add(p)
-                let idx = result.IndexOf("?")
-                if idx >= 0 then
-                    result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
-            result
+            this.SubstituteParams(fragment, parms, collector)
 
     /// Emits a comparison operator.
     member _.EmitOp(op: ComparisonOp) =
@@ -182,13 +194,7 @@ type SqlEmitterBase() =
         | Grouped inner ->
             this.EmitWhere(inner, collector) // wrap in parens
         | RawWhere (fragment, parms) ->
-            let mutable result = fragment
-            for p in parms do
-                let name = collector.Add(p)
-                let idx = result.IndexOf("?")
-                if idx >= 0 then
-                    result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
-            result
+            this.SubstituteParams(fragment, parms, collector)
         | BoolColumn (col, value) ->
             let quotedCol = this.QuoteColumn(col)
             this.EmitBoolColumn(quotedCol, value, collector)
@@ -240,13 +246,7 @@ type SqlEmitterBase() =
                     | SpecificColumn name -> this.QuoteColumn(name)
                     | RawColumn fragment -> this.QuoteRawFragment(fragment)
                     | RawColumnWithParams (fragment, parms) ->
-                        let mutable result = this.QuoteRawFragment(fragment)
-                        for p in parms do
-                            let name = collector.Add(p)
-                            let idx = result.IndexOf("?")
-                            if idx >= 0 then
-                                result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
-                        result
+                        this.SubstituteParams(this.QuoteRawFragment(fragment), parms, collector)
                 )
                 |> String.concat ", "
                 |> sb.Append |> ignore
@@ -310,13 +310,7 @@ type SqlEmitterBase() =
                     | OrderByColumnNulls (col, Desc, nulls) -> $"{this.QuoteColumn(col)} DESC{nullsSuffix nulls}"
                     | OrderByRaw fragment -> this.QuoteRawFragment(fragment)
                     | OrderByRawWithParams (fragment, parms) ->
-                        let mutable result = this.QuoteRawFragment(fragment)
-                        for p in parms do
-                            let name = collector.Add(p)
-                            let idx = result.IndexOf("?")
-                            if idx >= 0 then
-                                result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
-                        result
+                        this.SubstituteParams(this.QuoteRawFragment(fragment), parms, collector)
                 )
                 |> String.concat ", "
             sb.Append($" ORDER BY {orderCols}") |> ignore
@@ -385,13 +379,8 @@ type SqlEmitterBase() =
         let rawSetClauses =
             ir.SetRaws
             |> List.map (fun (col, fragment, parms) ->
-                let mutable result = this.QuoteRawFragment(fragment)
-                for p in parms do
-                    let name = collector.Add(p)
-                    let idx = result.IndexOf("?")
-                    if idx >= 0 then
-                        result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
-                $"{this.QuoteIdentifier(col)} = {result}"
+                let rendered = this.SubstituteParams(this.QuoteRawFragment(fragment), parms, collector)
+                $"{this.QuoteIdentifier(col)} = {rendered}"
             )
 
         sb.Append(setClauses @ rawSetClauses |> String.concat ", ") |> ignore
@@ -453,9 +442,22 @@ type SqlEmitterBase() =
     /// Default: no conflict handling.
     default _.EmitInsertConflict(_, insertSql, _, _, _) = insertSql
 
-    /// Append a RETURNING clause (PostgreSQL/SQLite). Default: no-op.
+    /// Append a RETURNING clause to a SQL command. Default: no-op (overridden by Postgres + Sqlite).
     abstract EmitReturning: returning: string list * sql: string -> string
     default _.EmitReturning(_, sql) = sql
+
+    /// Shared implementation for `EmitReturning` on dialects that support standard RETURNING (Postgres, Sqlite).
+    /// Inserts the clause before any trailing `;` produced by the identity-returning suffix.
+    member this.AppendReturning(returning: string list, sql: string) =
+        if returning.IsEmpty then sql
+        else
+            let cols = returning |> List.map this.QuoteIdentifier |> String.concat ", "
+            let trimmed = sql.TrimEnd()
+            if trimmed.EndsWith(";") then
+                let body = trimmed.Substring(0, trimmed.Length - 1)
+                $"{body} RETURNING {cols};"
+            else
+                $"{sql} RETURNING {cols}"
 
     /// Default: no output clause.
     default _.EmitInsertOutput(_, insertSql) = insertSql

@@ -7,9 +7,6 @@ open SqlHydra.Query.NpgsqlExtensions
 open SqlHydra.Query.Pgvector.PgvectorExtensions
 open type SqlHydra.Query.Pgvector.PgvectorExtensions.PgvectorFn
 open NUnit.Framework
-
-// Ensure pgvector infix operators are registered before any tests run.
-do ensureRegistered ()
 open DB
 #if NET8_0
 open Npgsql.AdventureWorksNet8
@@ -975,6 +972,9 @@ let ``Phase3: nested aggregate-in-aggregate (MAX(SUM(x)))`` () =
     sql.Contains("AS FLOAT") =! true
 
 // ─── Phase 4: pgvector ───
+// Each pgvector test calls ensureRegistered () because F# `open type` does not reliably trigger
+// the static initializer that would register the infix operators. App callers should call
+// ensureRegistered () once at startup; we do it per-test for isolation.
 
 [<Test>]
 let ``Phase4: cosine_distance emits <=> infix in select`` () =

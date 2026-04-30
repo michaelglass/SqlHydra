@@ -8,6 +8,14 @@ open FastExpressionCompiler
 let notImpl() = raise (NotImplementedException())
 let notImplMsg msg = raise (NotImplementedException msg)
 
+/// Aggregate method names recognized by the visitor. Used by visitSqlFn / pattern matchers.
+/// Keep in sync with QueryFunctions.Aggregates.
+let aggregateMethodNames =
+    System.Collections.Generic.HashSet<string>([
+        nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy
+        nameof countBy; nameof avgByAs; nameof countDistinct
+    ])
+
 /// Renders an aggregate function call. Special-cases COUNTDISTINCT → COUNT(DISTINCT col).
 let renderAggregate (aggType: string) (col: string) =
     if aggType = "COUNTDISTINCT" then $"COUNT(DISTINCT {col})"
@@ -292,7 +300,7 @@ module SqlPatterns =
 
     let (|AggregateColumn|_|) (exp: Expression) =
         match exp with
-        | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
+        | MethodCall m when aggregateMethodNames.Contains m.Method.Name ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
@@ -397,7 +405,7 @@ module NormalizedPatterns =
     /// Aggregate column pattern (minBy, maxBy, sumBy, avgBy, countBy, avgByAs).
     let (|NAggregateColumn|_|) (nexp: NormalizedExpression) =
         match nexp with
-        | NMethodCall(m, _) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
+        | NMethodCall(m, _) when aggregateMethodNames.Contains m.Method.Name ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
@@ -422,15 +430,20 @@ module NormalizedPatterns =
             | _ -> None
         | _ -> None
 
-let getComparison (expType: ExpressionType) =
+let tryGetComparison (expType: ExpressionType) =
     match expType with
-    | ExpressionType.Equal -> "="
-    | ExpressionType.NotEqual -> "<>"
-    | ExpressionType.GreaterThan -> ">"
-    | ExpressionType.GreaterThanOrEqual -> ">="
-    | ExpressionType.LessThan -> "<"
-    | ExpressionType.LessThanOrEqual -> "<="
-    | _ -> notImplMsg "Unsupported comparison type"
+    | ExpressionType.Equal -> Some "="
+    | ExpressionType.NotEqual -> Some "<>"
+    | ExpressionType.GreaterThan -> Some ">"
+    | ExpressionType.GreaterThanOrEqual -> Some ">="
+    | ExpressionType.LessThan -> Some "<"
+    | ExpressionType.LessThanOrEqual -> Some "<="
+    | _ -> None
+
+let getComparison (expType: ExpressionType) =
+    match tryGetComparison expType with
+    | Some s -> s
+    | None -> notImplMsg "Unsupported comparison type"
 
 let reverseComparison (expType: ExpressionType) =
     match expType with
@@ -469,51 +482,28 @@ let visitAlias (exp: Expression) =
         | _ -> notImpl()
     visit exp
 
+let private compileAndEval (e: Expression) =
+    System.Linq.Expressions.Expression.Lambda(e).Compile().DynamicInvoke()
+
 /// Converts a SQL function MethodCall expression to a SQL fragment string.
+/// Also renders argument expressions when called recursively as the entry point for
+/// general select-fragment compilation (caseWhen, castAs, etc.).
 /// Example: LEN(p.FirstName) -> "LEN({p}.{FirstName})"
 let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Expression) : string =
-    let rec renderArg (arg: Expression) =
-        match arg with
-        // Unwrap implicit numeric conversions (e.g., int → float when a column type widens).
-        | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
-            renderArg u.Operand
-        | Member mem when mem.Expression <> null ->
-            let alias = visitAlias mem.Expression
-            qualifyColumn alias mem.Member
-        | Member mem ->
-            // Static fields have null .Expression (e.g. Guid.Empty, DateTime.MinValue, String.Empty).
-            // Evaluate at compile time and inline as a SQL literal.
-            let value = System.Linq.Expressions.Expression.Lambda(mem).Compile().DynamicInvoke()
-            match value with
-            | null -> "NULL"
-            | :? string as s -> $"'{s}'"
-            | v -> sprintf "%O" v
-        | Constant c when c.Value = null ->
-            "NULL"
-        | Constant c when c.Type = typeof<string> ->
-            $"'{c.Value}'"
-        | Constant c ->
-            sprintf "%O" c.Value
-        | MethodCall _ as nested ->
-            visitSqlFn qualifyColumn nested
-        | _ ->
-            notImplMsg $"Unsupported argument type in SQL function: {arg.NodeType}"
-
-    let compileAndEval (e: Expression) =
-        System.Linq.Expressions.Expression.Lambda(e).Compile().DynamicInvoke()
-
     /// Render an arbitrary expression as a SQL fragment (literals inline, columns qualified, nested fns recursed).
     /// Supports: Member columns, static-field Members, Constants, Unary Convert, Binary arithmetic/compare, MethodCall.
     let rec renderExpr (arg: Expression) : string =
         match arg with
+        // Unwrap implicit numeric conversions (e.g., int → float when a column type widens).
         | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
             renderExpr u.Operand
         | Member mem when mem.Expression <> null ->
             let alias = visitAlias mem.Expression
             qualifyColumn alias mem.Member
         | Member mem ->
-            let value = compileAndEval mem
-            match value with
+            // Static fields have null .Expression (e.g. Guid.Empty, DateTime.MinValue, String.Empty).
+            // Evaluate at compile time and inline as a SQL literal.
+            match compileAndEval mem with
             | null -> "NULL"
             | :? string as s -> $"'{s}'"
             | v -> sprintf "%O" v
@@ -525,24 +515,21 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
             let left = renderExpr b.Left
             let right = renderExpr b.Right
             let op =
-                match b.NodeType with
-                | ExpressionType.Equal -> "="
-                | ExpressionType.NotEqual -> "<>"
-                | ExpressionType.GreaterThan -> ">"
-                | ExpressionType.GreaterThanOrEqual -> ">="
-                | ExpressionType.LessThan -> "<"
-                | ExpressionType.LessThanOrEqual -> "<="
-                | ExpressionType.AndAlso -> "AND"
-                | ExpressionType.OrElse -> "OR"
-                | ExpressionType.Add -> "+"
-                | ExpressionType.Subtract -> "-"
-                | ExpressionType.Multiply -> "*"
-                | ExpressionType.Divide -> "/"
-                | ExpressionType.Modulo -> "%"
-                | _ -> notImplMsg $"Unsupported binary operator in expression: {b.NodeType}"
+                match tryGetComparison b.NodeType with
+                | Some s -> s
+                | None ->
+                    match b.NodeType with
+                    | ExpressionType.AndAlso -> "AND"
+                    | ExpressionType.OrElse -> "OR"
+                    | ExpressionType.Add -> "+"
+                    | ExpressionType.Subtract -> "-"
+                    | ExpressionType.Multiply -> "*"
+                    | ExpressionType.Divide -> "/"
+                    | ExpressionType.Modulo -> "%"
+                    | _ -> notImplMsg $"Unsupported binary operator in expression: {b.NodeType}"
             $"{left} {op} {right}"
         | MethodCall _ as nested -> visitSqlFn qualifyColumn nested
-        | _ -> notImplMsg $"Unsupported expression in caseWhen/select fragment: {arg.NodeType}"
+        | _ -> notImplMsg $"Unsupported expression in select/caseWhen fragment: {arg.NodeType}"
 
     /// Extract (cond, value) pairs from an F# list literal like `[ a > 1, "x"; b > 2, "y" ]`.
     let rec extractListItems (exp: Expression) : (string * string) list =
@@ -558,15 +545,12 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         | _ ->
             // Fallback: compile-and-eval to runtime list.
             try
-                let value = compileAndEval exp
-                match value with
+                match compileAndEval exp with
                 | :? System.Collections.IEnumerable as items ->
                     [ for item in items do
                         let t = item.GetType()
-                        let condProp = t.GetProperty("Item1")
-                        let valProp = t.GetProperty("Item2")
-                        let cond = condProp.GetValue(item) :?> bool
-                        let v = valProp.GetValue(item)
+                        let cond = t.GetProperty("Item1").GetValue(item) :?> bool
+                        let v = t.GetProperty("Item2").GetValue(item)
                         let condStr = if cond then "TRUE" else "FALSE"
                         let valStr =
                             match v with
@@ -586,39 +570,33 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
 
     match exp with
     // CAST(expr AS sqlType) — target SQL type inferred from the F# return type.
-    | MethodCall m when m.Method.Name = "castAs" && m.Arguments.Count = 1 ->
-        let inner = renderExpr m.Arguments.[0]
-        let sqlType = sqlTypeForClrType m.Method.ReturnType
-        $"CAST({inner} AS {sqlType})"
+    | MethodCall m when m.Method.Name = nameof castAs && m.Arguments.Count = 1 ->
+        $"CAST({renderExpr m.Arguments.[0]} AS {sqlTypeForClrType m.Method.ReturnType})"
     // CASE WHEN cond THEN then ELSE else END
-    | MethodCall m when m.Method.Name = "caseWhen" && m.Arguments.Count = 3 ->
-        let cond = renderExpr m.Arguments.[0]
-        let thenV = renderExpr m.Arguments.[1]
-        let elseV = renderExpr m.Arguments.[2]
-        $"CASE WHEN {cond} THEN {thenV} ELSE {elseV} END"
+    | MethodCall m when m.Method.Name = nameof caseWhen && m.Arguments.Count = 3 ->
+        $"CASE WHEN {renderExpr m.Arguments.[0]} THEN {renderExpr m.Arguments.[1]} ELSE {renderExpr m.Arguments.[2]} END"
     // Multi-branch CASE WHEN
-    | MethodCall m when m.Method.Name = "caseWhenMulti" && m.Arguments.Count = 2 ->
-        let branches = extractListItems m.Arguments.[0]
-        let elseV = renderExpr m.Arguments.[1]
+    | MethodCall m when m.Method.Name = nameof caseWhenMulti && m.Arguments.Count = 2 ->
         let whens =
-            branches
+            extractListItems m.Arguments.[0]
             |> List.map (fun (c, v) -> $"WHEN {c} THEN {v}")
             |> String.concat " "
-        $"CASE {whens} ELSE {elseV} END"
+        $"CASE {whens} ELSE {renderExpr m.Arguments.[1]} END"
     // Lateral subquery column reference: lateralCol "alias" "col" → "alias"."col"
-    | MethodCall m when m.Method.Name = "lateralCol" && m.Arguments.Count = 2 ->
+    | MethodCall m when m.Method.Name = nameof lateralCol && m.Arguments.Count = 2 ->
         let alias = compileAndEval m.Arguments.[0] :?> string
         let column = compileAndEval m.Arguments.[1] :?> string
         $"\"{alias}\".\"{column}\""
     // Raw SQL escape hatch
-    | MethodCall m when m.Method.Name = "rawExpr" && m.Arguments.Count = 1 ->
+    | MethodCall m when m.Method.Name = nameof rawExpr && m.Arguments.Count = 1 ->
         compileAndEval m.Arguments.[0] :?> string
     // PostgreSQL INTERVAL literal: interval "7 days" → INTERVAL '7 days'
+    // (Method name string-matched because `interval` lives in NpgsqlExtensions and isn't in scope here.)
     | MethodCall m when m.Method.Name = "interval" && m.Arguments.Count = 1 ->
         let value = compileAndEval m.Arguments.[0] :?> string
         $"INTERVAL '{value}'"
     // Aggregates → render via renderAggregate (handles COUNT(DISTINCT col)).
-    | MethodCall m when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
+    | MethodCall m when aggregateMethodNames.Contains m.Method.Name ->
         let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
         match m.Arguments.[0] with
         | Member mem when mem.Expression <> null ->
@@ -627,16 +605,13 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         | inner ->
             // Nested expression inside aggregate (e.g. SUM(CAST(...)) or MAX(SUM(...)))
             renderAggregate aggType (renderExpr inner)
-    // 2-arg method calls registered as infix operators (e.g. pgvector cosine_distance → <=>).
-    | MethodCall m when m.Arguments.Count = 2 && (InfixOperators.tryGetOperator m.Method.Name).IsSome ->
-        let op = (InfixOperators.tryGetOperator m.Method.Name).Value
-        let left = renderArg m.Arguments.[0]
-        let right = renderArg m.Arguments.[1]
-        $"{left} {op} {right}"
     | MethodCall m ->
-        let fnName = m.Method.Name
-        let args = m.Arguments |> Seq.map renderArg |> String.concat ", "
-        $"{fnName}({args})"
+        match (if m.Arguments.Count = 2 then InfixOperators.tryGetOperator m.Method.Name else None) with
+        | Some op ->
+            $"{renderExpr m.Arguments.[0]} {op} {renderExpr m.Arguments.[1]}"
+        | None ->
+            let args = m.Arguments |> Seq.map renderExpr |> String.concat ", "
+            $"{m.Method.Name}({args})"
     | _ ->
         notImplMsg $"Expected a method call expression but got: {exp.NodeType}"
 
@@ -1036,7 +1011,7 @@ let visitHaving<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool
                 then IsNull(fqCol)
                 else IsNotNull(fqCol)
             | _ -> notImpl()
-        | NMethodCall(m, args) when List.contains m.Method.Name [ nameof minBy; nameof maxBy; nameof sumBy; nameof avgBy; nameof countBy; nameof avgByAs; nameof countDistinct ] ->
+        | NMethodCall(m, args) when aggregateMethodNames.Contains m.Method.Name ->
             visit args.[0]
         | NBinaryAnd(left, right) ->
             let lt = visit left
