@@ -480,6 +480,14 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         | Member mem when mem.Expression <> null ->
             let alias = visitAlias mem.Expression
             qualifyColumn alias mem.Member
+        | Member mem ->
+            // Static fields have null .Expression (e.g. Guid.Empty, DateTime.MinValue, String.Empty).
+            // Evaluate at compile time and inline as a SQL literal.
+            let value = System.Linq.Expressions.Expression.Lambda(mem).Compile().DynamicInvoke()
+            match value with
+            | null -> "NULL"
+            | :? string as s -> $"'{s}'"
+            | v -> sprintf "%O" v
         | Constant c when c.Value = null ->
             "NULL"
         | Constant c when c.Type = typeof<string> ->
