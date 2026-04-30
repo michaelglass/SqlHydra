@@ -1,13 +1,11 @@
 # v4 Port — Status
 
 Branch `feature/postgres-enhancements-v4` from `upstream/replace-sqlkata` (v4.0.0-beta.3).
-**32 commits** since base.
 
 ## Test results
 
 - **253/253** unit tests on net10.0
-- **1110/1117 (99.4%)** integration tests in thellma/intelligence (real consumer)
-- 7 remaining failures cluster in 2 query functions (EngagementAnalytics, DisengagementAlert) using deeply nested `correlate` + `leftJoin'` + lateral subquery + CASE WHEN with aggregate arithmetic patterns
+- **1117/1117 (100%)** integration tests in thellma/intelligence (real consumer)
 
 ## Integration journey (intelligence/ consumer)
 
@@ -20,7 +18,22 @@ Branch `feature/postgres-enhancements-v4` from `upstream/replace-sqlkata` (v4.0.
 | Float-literal preservation + infix-precedence parens + ExecReturning empty result | 19 |
 | `ExecReturning` mode for INSERT…RETURNING tuples + Set/List/Array.Contains in where | 17 |
 | Anonymous record AS-aliasing + tuple positional skip + F# pivot inlining | 7 |
-| Visitor: outer-scope columns in lateral subqueries, .Value-chain aggregates | **7** (current) |
+| Visitor: outer-scope columns in lateral subqueries, .Value-chain aggregates | 7 |
+| visitWhere outer-col-vs-constant; aggregates over arbitrary expressions | 5 |
+| renderSelectExpression delegates to visitSqlFn (caseWhen/castAs in arithmetic); inlineValue ISO date/guid | 2 |
+| Correlate Root-key collision fix; CTE schema-prefix; WithCtes propagation; enum literals | **0** ✅ |
+
+### The 7→0 closing fixes (one-day push)
+
+Each of these was reproduced from the failing thellma tests, traced via SQL dumps + IR introspection, and fixed at the root rather than worked around:
+
+- **`cf5c8f0`** — `visitWhere` outer-scope column vs constant fallback; `nEvaluate` handles `NConstant`. Lateral subqueries comparing a correlate-d outer parameter (`gd2.delivery_status = delivered`) hit the `notImpl` arm because `gd2` wasn't in local tables.
+- **`20a18fa`** — `NAggregateColumn` returns None on non-column args (was throwing). Aggregates over arbitrary expressions (`countBy(caseWhen ...)`, `sumBy(caseWhen ...)`) now fall through to the NMethodCall arm and render via `visitSqlFn`/`renderExpr`.
+- **`82d205c`** — `renderSelectExpression` delegates method-call rendering to `visitSqlFn` (was emitting `caseWhen(...)`, `castAs(...)` literally as identifier names). `inlineValue` formats DateTime/DateTimeOffset/Guid as proper SQL literals using invariant culture.
+- **`7d68141`** — `Correlate` pre-renames each side's `Root` key to its alias key (extracted from the resultSelector parameters) before merging. F# CE's `IsLikeZip = true` runs `Correlate` *before* the enclosing `For`, so without this the inner Root overwrote the outer Root and `For` set FROM to the wrong table. **This was the root cause of "column gd2.user_id does not exist" — the FROM clause silently used the correlate target instead of the for-loop source.**
+- **`0b1f689`** — `leftJoin`/`join`/`leftJoin'`/`join'` skip the schema prefix when schema is empty (CTE refs). Was emitting `""."recent_briefs"` (zero-length delimited identifier).
+- **`57ceb73`** — `leftJoin'`/`join'` propagate `WithCtes` from inner source onto the outer IR. Without this, `cteFrom` definitions vanished when used as a `leftJoin'` target.
+- **`98d817d`** — `formatNumericLiteral` quotes C# enum and F# nullary-DU values as string literals. `inlineValue complaintReason` had been rendering the unquoted enum name `complaint`, which Postgres parsed as an unknown column.
 
 ### Phase 1 — IR foundation (commit `5abce07`)
 
@@ -126,7 +139,7 @@ The pre-existing 3-failure regression on the branch (`cosine_distance` not conve
 
 ## Done
 
-The port is functionally complete for the postgres-enhancements feature set on top of `upstream/replace-sqlkata`. Open follow-ups are minor:
+The port is functionally complete for the postgres-enhancements feature set on top of `upstream/replace-sqlkata`. **100% green** in the thellma/intelligence consumer (1117/1117). Open follow-ups are minor:
 
 - Vector parameter binding for `orderByCosineDistance` etc. (uses `?` placeholder; needs `RawColumnWithParams` plumbing to bind the actual vector).
 - Run integration tests on SqlServer + Oracle once those containers are spun up.
