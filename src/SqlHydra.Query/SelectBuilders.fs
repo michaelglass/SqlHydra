@@ -419,13 +419,9 @@ type SelectBuilder<'Selected, 'Mapped> () =
         let outerAlias, innerAlias =
             match resultSelector.Parameters |> Seq.toList with
             | [outer; inner] -> outer.Name, inner.Name
-            | _ -> "", ""
-        let _, outerMappings =
-            if outerAlias = "" then None, outerSource.TableMappings
-            else TableMappings.tryGetByRootOrAlias outerAlias outerSource.TableMappings
-        let _, innerMappings =
-            if innerAlias = "" then None, innerSource.TableMappings
-            else TableMappings.tryGetByRootOrAlias innerAlias innerSource.TableMappings
+            | _ -> failwith "Expected two parameters in correlate result selector"
+        let _, outerMappings = TableMappings.tryGetByRootOrAlias outerAlias outerSource.TableMappings
+        let _, innerMappings = TableMappings.tryGetByRootOrAlias innerAlias innerSource.TableMappings
         let mergedTables = mergeTableMappings (outerMappings, innerMappings)
         let ir = outerSource |> getQueryOrDefault
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
