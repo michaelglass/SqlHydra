@@ -19,6 +19,8 @@ module PgvectorRegistration =
 /// pgvector distance functions for use in select expressions.
 /// Use `open type PgvectorFn` to access functions without qualification.
 /// These emit PostgreSQL pgvector infix operators: <=> (cosine), <-> (L2), <#> (inner product).
+/// **Important:** call `ensureRegistered ()` once at app startup before issuing queries —
+/// `open type PgvectorFn` does not reliably trigger module/type initialization in F#.
 type PgvectorFn =
     /// Cosine distance between two vectors. Emits: lhs <=> rhs
     static member cosine_distance(a: 'T, b: 'U) : float = sqlFn
