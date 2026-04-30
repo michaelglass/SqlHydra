@@ -191,6 +191,8 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     { ir with Select = ir.Select @ [SpecificColumn $"%s{tableAlias}.%s{column}"] }
                 | LinqExpressionVisitors.SelectedExpression sqlFragment ->
                     { ir with Select = ir.Select @ [RawColumn (sqlFragment, [||])] }
+                | LinqExpressionVisitors.SelectedExpressionWithParams (sqlFragment, parms) ->
+                    { ir with Select = ir.Select @ [RawColumn (sqlFragment, parms)] }
             ) state.Query
 
         QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)

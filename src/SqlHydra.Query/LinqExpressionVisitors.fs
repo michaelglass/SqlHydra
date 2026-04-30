@@ -1212,6 +1212,9 @@ type Selection =
     | SelectedTable of tableAlias: string * tableType: Type
     | SelectedColumn of tableAlias: string * column: string * columnType: Type * isOpt: bool * isNullable: bool
     | SelectedExpression of sqlFragment: string
+    /// Select projection with bound parameters (e.g. `1.0 - cosine_distance(col, inlineValue v)`).
+    /// Fragment uses `?` placeholders that the emitter binds in order.
+    | SelectedExpressionWithParams of sqlFragment: string * parameters: obj[]
 
 
 /// Visits a join predicate expression and builds a WhereClause for the JOIN ON condition.
@@ -1293,6 +1296,56 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
             notImplMsg $"Unsupported join predicate expression: {nexp}"
 
     visit (ExpressionNormalizer.toNormalizedExpression (predicate :> Expression))
+
+/// Renders a select-projection expression to a SQL fragment with bound parameters.
+/// Used for arithmetic/inlineValue/method-call combinations like `1.0 - cosine_distance(col, inlineValue v)`.
+/// inlineValue args are compile-and-eval'd as bound parameters (`?`); columns are qualified;
+/// InfixOperators rewrites apply.
+let private renderSelectExpression (exp: Expression) : string * obj[] =
+    let parms = ResizeArray<obj>()
+    let qualifyColumn alias (mem: MemberInfo) = $"{{{alias}}}.{{{mem.Name}}}"
+    let rec render (e: Expression) : string =
+        match e with
+        | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
+            render u.Operand
+        | :? MethodCallExpression as mc when mc.Method.Name = nameof inlineValue && mc.Arguments.Count = 1 ->
+            let value = compileAndEval mc.Arguments.[0]
+            parms.Add(if isNull value then box System.DBNull.Value else value)
+            "?"
+        | :? MemberExpression as mem when mem.Expression <> null ->
+            let alias = visitAlias mem.Expression
+            qualifyColumn alias mem.Member
+        | :? ConstantExpression as c when c.Value = null -> "NULL"
+        | :? ConstantExpression as c when c.Type = typeof<string> -> $"'{c.Value}'"
+        | :? ConstantExpression as c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
+        | :? ConstantExpression as c -> sprintf "%O" c.Value
+        | :? BinaryExpression as b ->
+            let left = render b.Left
+            let right = render b.Right
+            let op =
+                match tryGetComparison b.NodeType with
+                | Some s -> s
+                | None ->
+                    match b.NodeType with
+                    | ExpressionType.AndAlso -> "AND"
+                    | ExpressionType.OrElse -> "OR"
+                    | ExpressionType.Add -> "+"
+                    | ExpressionType.Subtract -> "-"
+                    | ExpressionType.Multiply -> "*"
+                    | ExpressionType.Divide -> "/"
+                    | ExpressionType.Modulo -> "%"
+                    | _ -> notImplMsg $"Unsupported binary operator in select expression: {b.NodeType}"
+            $"{left} {op} {right}"
+        | :? MethodCallExpression as mc when mc.Arguments.Count = 2 && (InfixOperators.tryGetOperator mc.Method.Name).IsSome ->
+            let op = (InfixOperators.tryGetOperator mc.Method.Name).Value
+            $"{render mc.Arguments.[0]} {op} {render mc.Arguments.[1]}"
+        | :? MethodCallExpression as mc ->
+            let args = mc.Arguments |> Seq.map render |> String.concat ", "
+            $"{mc.Method.Name}({args})"
+        | _ ->
+            notImplMsg $"Unsupported expression in select projection: {e.NodeType}"
+    let frag = render exp
+    frag, parms.ToArray()
 
 /// Returns a list of one or more fully qualified table names: ["{schema}.{table}"]
 let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
@@ -1379,8 +1432,19 @@ let visitSelect<'T, 'Prop> (propertySelector: Expression<Func<'T, 'Prop>>) =
             let qualifyCol alias (mem: MemberInfo) = $"{{%s{alias}}}.{{%s{mem.Name}}}"
             let sqlFragment = visitSqlFn qualifyCol (m :> Expression)
             [ SelectedExpression sqlFragment ]
-        | NNew(_, args) ->
-            args |> List.collect visit
+        | NNew(newExpr, args) ->
+            // Each anonymous-record / tuple / DU field initializer is one Selection.
+            // Binary, Unary, and inlineValue-bearing initializers fall through to the
+            // expression-walker that emits SelectedExpressionWithParams.
+            args
+            |> List.mapi (fun i nargs -> i, nargs)
+            |> List.collect (fun (i, narg) ->
+                match narg with
+                | NMethodCall _ | NAggregateColumn _ | NMemberAccess _ | NParameter _ | NNew _ ->
+                    visit narg
+                | _ ->
+                    let frag, parms = renderSelectExpression newExpr.Arguments.[i]
+                    [ SelectedExpressionWithParams (frag, parms) ])
         | NParameter p ->
             [ SelectedTable (p.Name, p.Type) ]
         | NMemberAccess(inner, m) ->
