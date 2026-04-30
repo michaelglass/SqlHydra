@@ -485,6 +485,23 @@ let visitAlias (exp: Expression) =
 let private compileAndEval (e: Expression) =
     System.Linq.Expressions.Expression.Lambda(e).Compile().DynamicInvoke()
 
+/// Formats a numeric constant as SQL literal, preserving the type's decimal form for floats.
+/// `1.0` (double) → "1.0", not "1" (which Postgres types as integer and breaks `1.0 - <vector>` queries).
+let private formatNumericLiteral (value: obj) (clrType: System.Type) =
+    let inv = System.Globalization.CultureInfo.InvariantCulture
+    if clrType = typeof<float> || clrType = typeof<double> then
+        let v = value :?> double
+        let s = v.ToString("R", inv)
+        if s.Contains(".") || s.Contains("e") || s.Contains("E") then s else s + ".0"
+    elif clrType = typeof<single> || clrType = typeof<float32> then
+        let v = value :?> single
+        let s = v.ToString("R", inv)
+        if s.Contains(".") || s.Contains("e") || s.Contains("E") then s else s + ".0"
+    elif clrType = typeof<decimal> then
+        (value :?> decimal).ToString(inv)
+    else
+        sprintf "%O" value
+
 /// Converts a SQL function MethodCall expression to a SQL fragment string.
 /// Also renders argument expressions when called recursively as the entry point for
 /// general select-fragment compilation (caseWhen, castAs, etc.).
@@ -518,7 +535,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         | Constant c when c.Value = null -> "NULL"
         | Constant c when c.Type = typeof<string> -> $"'{c.Value}'"
         | Constant c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
-        | Constant c -> sprintf "%O" c.Value
+        | Constant c -> formatNumericLiteral c.Value c.Type
         | :? BinaryExpression as b ->
             let left = renderExpr b.Left
             let right = renderExpr b.Right
@@ -1141,7 +1158,7 @@ let visitOrderByPropertySelector<'T, 'Prop> (propertySelector: Expression<Func<'
                     qualifyColumn alias mem.Member
                 | :? ConstantExpression as c when c.Value = null -> "NULL"
                 | :? ConstantExpression as c when c.Type = typeof<string> -> $"'{c.Value}'"
-                | :? ConstantExpression as c -> sprintf "%O" c.Value
+                | :? ConstantExpression as c -> formatNumericLiteral c.Value c.Type
                 | :? MethodCallExpression as mc when mc.Arguments.Count = 2 && (InfixOperators.tryGetOperator mc.Method.Name).IsSome ->
                     let op = (InfixOperators.tryGetOperator mc.Method.Name).Value
                     $"{render mc.Arguments.[0]} {op} {render mc.Arguments.[1]}"
@@ -1318,7 +1335,7 @@ let private renderSelectExpression (exp: Expression) : string * obj[] =
         | :? ConstantExpression as c when c.Value = null -> "NULL"
         | :? ConstantExpression as c when c.Type = typeof<string> -> $"'{c.Value}'"
         | :? ConstantExpression as c when c.Type = typeof<bool> -> if c.Value :?> bool then "TRUE" else "FALSE"
-        | :? ConstantExpression as c -> sprintf "%O" c.Value
+        | :? ConstantExpression as c -> formatNumericLiteral c.Value c.Type
         | :? BinaryExpression as b ->
             let left = render b.Left
             let right = render b.Right
