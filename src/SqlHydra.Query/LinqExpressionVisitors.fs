@@ -419,9 +419,20 @@ module NormalizedPatterns =
         match nexp with
         | NMethodCall(m, _) when aggregateMethodNames.Contains m.Method.Name ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
+            // Argument may be a direct Property `col` or an Option/Nullable Value chain
+            // like `opt.Value.col` (after a leftJoin'). Walk through wrappers.
+            let rec unwrapToProperty (e: Expression) =
+                match e with
+                | Property (p, ext) -> Some (p, ext)
+                | Member m when m.Expression <> null -> unwrapToProperty m.Expression
+                | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert -> unwrapToProperty u.Operand
+                | _ -> None
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
-            | _ -> notImplMsg "Invalid argument to aggregate function."
+            | other ->
+                match unwrapToProperty other with
+                | Some p -> Some (aggType, p)
+                | None -> notImplMsg "Invalid argument to aggregate function."
         | _ -> None
 
     /// List initializer — delegates to original ListInit pattern.
@@ -1016,6 +1027,18 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
 
             | NValue _, NValue _ ->
                 notImplMsg("Value to value comparisons are not currently supported. Ex: where (1 = 1)")
+
+            // Fallback: both sides are member-access chains on parameters that aren't in
+            // the local `tables` map (e.g. outer-scope columns inside a lateral subquery).
+            // Treat as column-to-column comparison.
+            | NMemberAccess (_, ml), NMemberAccess (_, mr) when ml.Expression <> null && mr.Expression <> null ->
+                try
+                    let aliasL = visitAlias ml.Expression
+                    let aliasR = visitAlias mr.Expression
+                    let lt = qualifyColumn aliasL ml.Member
+                    let rt = qualifyColumn aliasR mr.Member
+                    CompareColumns(lt, compOp, rt)
+                with _ -> notImpl()
             | _ ->
                 notImpl()
 
