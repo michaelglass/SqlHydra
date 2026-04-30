@@ -101,7 +101,11 @@ type PostgresEmitter() =
 
     override this.EmitReturning(returning, sql) = this.AppendReturning(returning, sql)
 
-    override this.EmitInsertConflict(insertType, insertSql, columns, _rows, collector) =
+    override this.EmitInsertConflict(insertType, table, insertSql, columns, _rows, collector) =
+        // Bare table name (last dotted segment) for disambiguating `EXCLUDED.col` vs target-table `col`.
+        let bareTable =
+            let parts = table.Split('.')
+            parts.[parts.Length - 1]
         match insertType with
         | OnConflictDoUpdate (conflictFields, updateFields) ->
             let insertQuery, identityQuery = this.SplitInsertAndIdentity(insertSql)
@@ -124,7 +128,7 @@ type PostgresEmitter() =
                 updateFields
                 |> List.map (fun col ->
                     if coalesceSet.Contains col
-                    then $"\"{col}\" = COALESCE(EXCLUDED.\"{col}\", \"{col}\")\n"
+                    then $"\"{col}\" = COALESCE(EXCLUDED.\"{col}\", \"{bareTable}\".\"{col}\")\n"
                     else $"\"{col}\" = EXCLUDED.\"{col}\"\n")
                 |> fun lines -> String.Join(",", lines)
             let conflictCsv = String.Join(",", conflictFields)
@@ -187,7 +191,10 @@ type SqliteEmitter() =
 
     override this.EmitReturning(returning, sql) = this.AppendReturning(returning, sql)
 
-    override this.EmitInsertConflict(insertType, insertSql, _columns, _rows, _collector) =
+    override this.EmitInsertConflict(insertType, table, insertSql, _columns, _rows, _collector) =
+        let bareTable =
+            let parts = table.Split('.')
+            parts.[parts.Length - 1]
         match insertType with
         | InsertOrReplace ->
             insertSql.Replace("INSERT", "INSERT OR REPLACE")
@@ -213,7 +220,7 @@ type SqliteEmitter() =
                 updateFields
                 |> List.map (fun col ->
                     if coalesceSet.Contains col
-                    then $"\"{col}\" = COALESCE(EXCLUDED.\"{col}\", \"{col}\")\n"
+                    then $"\"{col}\" = COALESCE(EXCLUDED.\"{col}\", \"{bareTable}\".\"{col}\")\n"
                     else $"\"{col}\" = EXCLUDED.\"{col}\"\n")
                 |> fun lines -> String.Join(",", lines)
             let conflictCsv = String.Join(",", conflictFields)

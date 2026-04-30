@@ -39,7 +39,9 @@ type SqlEmitterBase() =
     abstract EmitMultiRowInsert: table: string * columns: string list * rows: obj[] list * collector: ParameterCollector -> string
 
     /// Emit upsert/conflict handling clauses. Default: no-op.
-    abstract EmitInsertConflict: insertType: InsertType * insertSql: string * columns: string list * rows: obj[] list * collector: ParameterCollector -> string
+    /// `table` is the dotted INSERT target (e.g. "public.waitlist_entries") so DO UPDATE
+    /// branches can disambiguate `EXCLUDED.col` vs the target table's `col` reference.
+    abstract EmitInsertConflict: insertType: InsertType * table: string * insertSql: string * columns: string list * rows: obj[] list * collector: ParameterCollector -> string
 
     /// Emit OUTPUT clause for INSERT (SQL Server). Default: empty.
     abstract EmitInsertOutput: outputFields: OutputField list * insertSql: string -> string
@@ -345,7 +347,7 @@ type SqlEmitterBase() =
                 | rows -> this.EmitMultiRowInsert(ir.Table, ir.Columns, rows, collector)
 
         // Apply conflict handling
-        let withConflict = this.EmitInsertConflict(ir.InsertType, baseSql, ir.Columns, ir.Rows, collector)
+        let withConflict = this.EmitInsertConflict(ir.InsertType, ir.Table, baseSql, ir.Columns, ir.Rows, collector)
 
         // Apply output clause
         let withOutput =
@@ -438,7 +440,7 @@ type SqlEmitterBase() =
     default _.EmitInsertIdentity(_) = ""
 
     /// Default: no conflict handling.
-    default _.EmitInsertConflict(_, insertSql, _, _, _) = insertSql
+    default _.EmitInsertConflict(_, _, insertSql, _, _, _) = insertSql
 
     /// Append a RETURNING clause to a SQL command. Default: no-op (overridden by Postgres + Sqlite).
     abstract EmitReturning: returning: string list * sql: string -> string

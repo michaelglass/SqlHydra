@@ -797,7 +797,7 @@ let ``Phase2: onConflictDoUpdateCoalesce emits COALESCE expressions`` () =
         }
     let sql = toInsertSql q
     sql.Contains("ON CONFLICT(addressid) DO UPDATE SET") =! true
-    sql.Contains("\"city\" = COALESCE(EXCLUDED.\"city\", \"city\")") =! true
+    sql.Contains("\"city\" = COALESCE(EXCLUDED.\"city\", \"address\".\"city\")") =! true
 
 [<Test>]
 let ``Phase2: onConflictDoNothingRawTarget emits raw target expr`` () =
