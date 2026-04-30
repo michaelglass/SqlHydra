@@ -6,6 +6,12 @@
     <Description>pgvector distance functions for SqlHydra.Query — cosine, L2, and inner product distance operators.</Description>
     <Authors>Jordan Marr</Authors>
     <PackageTags>F# fsharp sql pgvector vector similarity</PackageTags>
+    <NoWarn>
+      <!-- FS1182: Unused parameters in stub functions (cosine_distance etc.) are intentional
+           pattern markers for the visitor — they exist so users can pass values; the
+           visitor recognizes the call-site shape rather than evaluating the body. -->
+      FS1182
+    </NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
