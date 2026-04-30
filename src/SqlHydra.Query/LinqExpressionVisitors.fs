@@ -316,7 +316,7 @@ module SqlPatterns =
             | other ->
                 match unwrapToProperty other with
                 | Some p -> Some (aggType, p)
-                | None -> notImplMsg "Invalid argument to aggregate function."
+                | None -> notImplMsg $"Invalid argument to aggregate function. arg={other.GetType().Name}: {other}"
         | _ -> None
 
 // ─── NormalizedExpression Patterns ───────────────────────────────────────────
@@ -432,7 +432,7 @@ module NormalizedPatterns =
             | other ->
                 match unwrapToProperty other with
                 | Some p -> Some (aggType, p)
-                | None -> notImplMsg "Invalid argument to aggregate function."
+                | None -> notImplMsg $"Invalid argument to aggregate function. arg={other.GetType().Name}: {other}"
         | _ -> None
 
     /// List initializer — delegates to original ListInit pattern.
@@ -679,6 +679,7 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
     let nEvaluate (nexp: NormalizedExpression) =
         match nexp with
         | NValue v -> v
+        | NConstant(v, _) -> v
         | NMemberAccess(_, m) -> compileAndEvaluateExpression (m :> Expression)
         | NMethodCall(m, _) -> compileAndEvaluateExpression (m :> Expression)
         | NUnknown exp -> compileAndEvaluateExpression exp
@@ -1029,26 +1030,43 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 notImplMsg("Value to value comparisons are not currently supported. Ex: where (1 = 1)")
 
             | _ ->
-                // Fallback: try to render both sides as outer-scope column refs
-                // (e.g. lateral subquery referencing correlate-d outer table.)
-                // Walk through NUnary(Convert, _), NMethodCall(Some, _), NMemberAccess to find a Member chain.
-                let rec asMember (n: NormalizedExpression) =
+                // Fallback: outer-scope column refs (lateral subquery referencing
+                // a correlate-d parent table). The parameter isn't in the local
+                // `tables` map so NColumn doesn't match, but visitAlias still
+                // returns the parameter name as alias.
+                let rec asOuterCol (n: NormalizedExpression) =
                     match n with
-                    | NMemberAccess(_, m) when m.Expression <> null -> Some m
-                    | NUnary(ExpressionType.Convert, inner) -> asMember inner
-                    | NMethodCall(call, _) when call.Method.Name = "Some" && call.Arguments.Count = 1 ->
-                        asMember (visitExpression call.Arguments.[0])
+                    | NMemberAccess(_, m) when (m.Expression :? ParameterExpression) -> Some m
+                    | NUnary(ExpressionType.Convert, inner) -> asOuterCol inner
                     | _ -> None
-                match asMember left, asMember right with
+                let tryEval (n: NormalizedExpression) =
+                    try Some (nEvaluate n) with _ -> None
+                match asOuterCol left, asOuterCol right with
                 | Some ml, Some mr ->
-                    try
-                        let aliasL = visitAlias ml.Expression
-                        let aliasR = visitAlias mr.Expression
-                        let lt = qualifyColumn aliasL ml.Member
-                        let rt = qualifyColumn aliasR mr.Member
-                        CompareColumns(lt, compOp, rt)
-                    with ex -> notImplMsg $"[where-cmp-asMember-thrown] {ex.Message}\nleft={left}\nright={right}"
-                | _ -> notImplMsg $"[where-cmp-fallthrough] op={compOp}\nleft={left}\nright={right}"
+                    let lt = qualifyColumn (visitAlias ml.Expression) ml.Member
+                    let rt = qualifyColumn (visitAlias mr.Expression) mr.Member
+                    CompareColumns(lt, compOp, rt)
+                | Some ml, None ->
+                    let fq = qualifyColumn (visitAlias ml.Expression) ml.Member
+                    match tryEval right with
+                    | Some null when op = ExpressionType.Equal -> IsNull(fq)
+                    | Some null when op = ExpressionType.NotEqual -> IsNotNull(fq)
+                    | Some v ->
+                        let qp = QueryUtils.getQueryParameterForValue ml.Member v
+                        Compare(fq, compOp, Parameter qp)
+                    | None -> notImplMsg $"[where-cmp] cannot eval RHS: {right}"
+                | None, Some mr ->
+                    let fq = qualifyColumn (visitAlias mr.Expression) mr.Member
+                    let rev = reverseComparisonOp compOp
+                    match tryEval left with
+                    | Some null when op = ExpressionType.Equal -> IsNull(fq)
+                    | Some null when op = ExpressionType.NotEqual -> IsNotNull(fq)
+                    | Some v ->
+                        let qp = QueryUtils.getQueryParameterForValue mr.Member v
+                        Compare(fq, rev, Parameter qp)
+                    | None -> notImplMsg $"[where-cmp] cannot eval LHS: {left}"
+                | None, None ->
+                    notImplMsg $"[where-cmp-fallthrough] op={compOp}\nleft={left}\nright={right}"
 
         | _ ->
             notImplMsg $"Unsupported expression type in where clause: {nexp}"
