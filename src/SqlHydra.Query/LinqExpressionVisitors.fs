@@ -663,6 +663,31 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
 
     let rec visit (nexp: NormalizedExpression) : WhereClause =
         match nexp with
+        // Idiomatic F#: `set.Contains col`, `list.Contains col`, `array.Contains col`,
+        // and `Seq.contains col xs` / `List.contains col xs`. Compile to `col IN (values)`.
+        // The collection is compile-and-eval'd (it must be a closed-over value, not a column).
+        | NMethodCall(m, args) when m.Method.Name = "Contains" ->
+            let receiverExp, columnNExp =
+                if m.Object <> null && args.Length = 1 then
+                    // Instance method: receiver.Contains(col)
+                    m.Object, args.[0]
+                elif args.Length = 2 then
+                    // Static: Module.contains col xs OR xs.Contains col-via-extension
+                    m.Arguments.[0], args.[1]
+                else
+                    notImplMsg $"Unsupported Contains shape: {nexp}"
+            match columnNExp with
+            | NColumn (p, _) ->
+                let receiver = compileAndEvaluateExpression receiverExp
+                let queryParameters =
+                    (receiver :?> System.Collections.IEnumerable)
+                    |> Seq.cast<obj>
+                    |> Seq.map (QueryUtils.getQueryParameterForValue p.Member)
+                    |> Seq.toArray
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                InValues(fqCol, queryParameters)
+            | _ -> notImplMsg $"Unsupported Contains column argument: {columnNExp}"
         | NMethodCall(m, args) when List.contains m.Method.Name [ nameof isIn; nameof isNotIn; nameof op_BarEqualsBar; nameof op_BarLessGreaterBar ] ->
             let isIn = List.contains m.Method.Name [ nameof isIn; nameof op_BarEqualsBar ]
 
@@ -1306,6 +1331,42 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
                 | _ ->
                     let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
                     Compare(fqCol, compOp, Parameter queryParameter)
+
+            // Column compared to a non-NValue expression (typically a captured local or static member).
+            // Compile-and-eval the RHS to obtain the runtime value.
+            | NColumn (p, _), (NMemberAccess _ | NMethodCall _ | NUnknown _) ->
+                let value =
+                    match right with
+                    | NMemberAccess(_, m) -> compileAndEvaluateExpression (m :> Expression)
+                    | NMethodCall(m, _) -> compileAndEvaluateExpression (m :> Expression)
+                    | NUnknown e -> compileAndEvaluateExpression e
+                    | _ -> notImplMsg "Unreachable"
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                match value with
+                | null when op = ExpressionType.Equal -> IsNull(fqCol)
+                | null when op = ExpressionType.NotEqual -> IsNotNull(fqCol)
+                | _ ->
+                    let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
+                    Compare(fqCol, compOp, Parameter queryParameter)
+
+            // Reverse: captured value compared to column.
+            | (NMemberAccess _ | NMethodCall _ | NUnknown _), NColumn (p, _) ->
+                let value =
+                    match left with
+                    | NMemberAccess(_, m) -> compileAndEvaluateExpression (m :> Expression)
+                    | NMethodCall(m, _) -> compileAndEvaluateExpression (m :> Expression)
+                    | NUnknown e -> compileAndEvaluateExpression e
+                    | _ -> notImplMsg "Unreachable"
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                let reversedOp = reverseComparisonOp compOp
+                match value with
+                | null when reversedOp = Eq -> IsNull(fqCol)
+                | null when reversedOp = NotEq -> IsNotNull(fqCol)
+                | _ ->
+                    let queryParameter = QueryUtils.getQueryParameterForValue p.Member value
+                    Compare(fqCol, reversedOp, Parameter queryParameter)
 
             | _ ->
                 notImplMsg $"Unsupported join predicate comparison: {op}"
