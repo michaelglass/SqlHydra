@@ -65,6 +65,14 @@ type SqlFn =
     static member make_date(year: int, month: int, day: int) : DateTime = sqlFn
     static member make_time(hour: int, minute: int, second: float) : TimeSpan = sqlFn
 
+    // GREATEST / LEAST — variadic standard SQL functions
+    static member greatest(a: 'T, b: 'T) : 'T = sqlFn
+    static member greatest(a: 'T, b: 'T, c: 'T) : 'T = sqlFn
+    static member greatest(a: 'T, b: 'T, c: 'T, d: 'T) : 'T = sqlFn
+    static member least(a: 'T, b: 'T) : 'T = sqlFn
+    static member least(a: 'T, b: 'T, c: 'T) : 'T = sqlFn
+    static member least(a: 'T, b: 'T, c: 'T, d: 'T) : 'T = sqlFn
+
 /// PostgreSQL-specific functions.
 type PgSqlFn =
     /// Renders a PostgreSQL `INTERVAL '<value>'` literal.
@@ -126,6 +134,97 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
         let spec = state.Query
         let newSpec = { spec with InsertType = OnConflictDoNothingRawTarget rawTargetExpr }
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+    // ─── Composable ON CONFLICT API ──────────────────────────────────────────────
+    // Usage:
+    //   onConflict col [whereRawConflict "..."]  (sets target)
+    //   doNothing | doUpdate cols | doUpdateCoalesce cols  (sets action)
+    //
+    // The target is held in PendingConflict until an action operation finalizes
+    // the spec into a closed `InsertType` value.
+
+    /// Sets the conflict target to typed column(s). Followed by `doNothing` / `doUpdate` / `doUpdateCoalesce`.
+    [<CustomOperation("onConflict", MaintainsVariableSpace = true)>]
+    member this.OnConflict(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFields) =
+        let spec = state.Query
+        let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'ConflictProperty> conflictFields (fun _ p -> p.Name)
+        let newSpec = { spec with PendingConflict = Some (TypedConflictColumns (conflictFields, None)) }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+    /// Sets a raw-expression conflict target (for expression indexes like `lower(email)`).
+    /// Followed by `doNothing` / `doUpdate` / `doUpdateCoalesce`.
+    [<CustomOperation("onConflictRaw", MaintainsVariableSpace = true)>]
+    member this.OnConflictRaw(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        rawTargetExpr: string) =
+        let spec = state.Query
+        let newSpec = { spec with PendingConflict = Some (RawConflictTarget (rawTargetExpr, None)) }
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(newSpec, state.TableMappings)
+
+    /// Adds a partial-index WHERE clause to the conflict target (must follow `onConflict`).
+    [<CustomOperation("whereRawConflict", MaintainsVariableSpace = true)>]
+    member this.WhereRawConflict(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        whereClause: string) =
+        let spec = state.Query
+        let updated =
+            match spec.PendingConflict with
+            | Some (TypedConflictColumns (fields, _)) -> TypedConflictColumns (fields, Some whereClause)
+            | Some (RawConflictTarget (raw, _)) -> RawConflictTarget (raw, Some whereClause)
+            | None -> failwith "whereRawConflict requires onConflict (or onConflictRaw) to be called first"
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
+            { spec with PendingConflict = Some updated }, state.TableMappings)
+
+    /// Conflict action: DO NOTHING. Closes the pending conflict target into InsertType.
+    [<CustomOperation("doNothing", MaintainsVariableSpace = true)>]
+    member this.DoNothing(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>) =
+        let spec = state.Query
+        let newType =
+            match spec.PendingConflict with
+            | Some (TypedConflictColumns (fields, None)) ->
+                OnConflictDoNothing fields
+            | Some (TypedConflictColumns (fields, Some whereRaw)) ->
+                OnConflictDoNothingWhereRaw (fields, whereRaw, [||])
+            | Some (RawConflictTarget (raw, None)) ->
+                OnConflictDoNothingRawTarget raw
+            | Some (RawConflictTarget (_, Some _)) ->
+                failwith "ON CONFLICT (raw target) WHERE clause is not currently supported; use onConflict <columns> with whereRawConflict instead"
+            | None ->
+                failwith "doNothing requires onConflict (or onConflictRaw) to be called first"
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
+            { spec with InsertType = newType; PendingConflict = None },
+            state.TableMappings)
+
+    /// Conflict action: DO UPDATE SET col=EXCLUDED.col for each update field.
+    [<CustomOperation("doUpdate", MaintainsVariableSpace = true)>]
+    member this.DoUpdate(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] updateFields) =
+        let spec = state.Query
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun _ p -> p.Name)
+        let conflictFields =
+            match spec.PendingConflict with
+            | Some (TypedConflictColumns (fields, None)) -> fields
+            | Some (TypedConflictColumns _) -> failwith "doUpdate does not currently support a partial-index WHERE clause"
+            | Some (RawConflictTarget _) -> failwith "doUpdate requires a typed conflict target (use onConflict, not onConflictRaw)"
+            | None -> failwith "doUpdate requires onConflict to be called first"
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
+            { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields); PendingConflict = None },
+            state.TableMappings)
+
+    /// Conflict action: DO UPDATE SET col = COALESCE(EXCLUDED.col, table.col) for each update field.
+    [<CustomOperation("doUpdateCoalesce", MaintainsVariableSpace = true)>]
+    member this.DoUpdateCoalesce(state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        [<ProjectionParameter>] updateFields) =
+        let spec = state.Query
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'T, 'UpdateProperties> updateFields (fun _ p -> p.Name)
+        let conflictFields =
+            match spec.PendingConflict with
+            | Some (TypedConflictColumns (fields, None)) -> fields
+            | Some (TypedConflictColumns _) -> failwith "doUpdateCoalesce does not currently support a partial-index WHERE clause"
+            | Some (RawConflictTarget _) -> failwith "doUpdateCoalesce requires a typed conflict target (use onConflict, not onConflictRaw)"
+            | None -> failwith "doUpdateCoalesce requires onConflict to be called first"
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
+            { spec with InsertType = OnConflictDoUpdateCoalesce (conflictFields, updateFields); PendingConflict = None },
+            state.TableMappings)
 
 type SelectBuilder<'Selected, 'Mapped> with
 

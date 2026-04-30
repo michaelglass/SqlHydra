@@ -70,6 +70,15 @@ type QueryParameter =
         | Some providerDbType -> $"%s{providerDbType}: {this.Value}"
         | None -> $"obj: {this.Value}"
 
+/// Pending conflict target accumulated by the composable `onConflict ...` CE op,
+/// awaiting a `doNothing` / `doUpdate` / `doUpdateCoalesce` action to finalize.
+[<NoComparison>]
+type PendingConflictTarget =
+    /// `onConflict col1 col2 ...` — typed columns
+    | TypedConflictColumns of fields: string list * whereRaw: string option
+    /// `onConflictRaw "lower(email)"` — expression-index target
+    | RawConflictTarget of rawTargetExpr: string * whereRaw: string option
+
 [<NoComparison>]
 type InsertQuerySpec<'T, 'Identity> =
     {
@@ -81,10 +90,13 @@ type InsertQuerySpec<'T, 'Identity> =
         InsertType: InsertType
         Returning: string list
         FromSelect: SelectQueryIR option
+        /// Pending conflict target while building a composable `onConflict ... doNothing` chain.
+        /// Cleared once a conflict action finalizes the spec into `InsertType`.
+        PendingConflict: PendingConflictTarget option
     }
     static member Default : InsertQuerySpec<'T, 'Identity> =
         { Table = ""; Entities = []; Fields = []; IdentityField = None; OutputFields = []
-          InsertType = Insert; Returning = []; FromSelect = None }
+          InsertType = Insert; Returning = []; FromSelect = None; PendingConflict = None }
 
 [<NoComparison>]
 type UpdateQuerySpec<'T, 'UpdateReturn> =
