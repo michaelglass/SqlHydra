@@ -219,7 +219,13 @@ type QueryContext(conn: DbConnection, emitter: ISqlEmitter) =
     member private _.ReadReturningValues<'Return> (cmd: DbCommand) (cancel: CancellationToken) (returningCols: string list) =
         task {
             use! reader = cmd.ExecuteReaderAsync(cancel)
-            let! _ = reader.ReadAsync(cancel)
+            let! hasRow = reader.ReadAsync(cancel)
+            if not hasRow then
+                // ON CONFLICT DO NOTHING with no actual conflict-update returns zero rows.
+                // Caller signature already accepts the default value; semantics mirror the
+                // "insert was a no-op" outcome.
+                return Unchecked.defaultof<'Return>
+            else
 
             let elementTypes =
                 let t = typeof<'Return>
