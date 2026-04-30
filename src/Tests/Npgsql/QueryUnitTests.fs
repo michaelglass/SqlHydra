@@ -886,3 +886,85 @@ let ``Phase3: InfixOperators registered name renders as infix in select`` () =
     // surface that isn't trivial in v4 select context — see PORT_STATUS for follow-up work.
     InfixOperators.tryGetOperator "myDistance" =! Some "<->"
     sql.Contains("SELECT") =! true
+
+[<Test>]
+let ``Phase3: caseWhen emits CASE WHEN ... THEN ... ELSE ... END`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select (caseWhen (p.standardcost > 100m) "expensive" "cheap")
+        }
+        |> toSql
+    sql.Contains("CASE WHEN") =! true
+    sql.Contains("THEN 'expensive'") =! true
+    sql.Contains("ELSE 'cheap'") =! true
+
+[<Test>]
+let ``Phase3: caseWhen with column comparison emits column refs`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select (caseWhen (p.standardcost > p.listprice) "loss" "profit")
+        }
+        |> toSql
+    sql.Contains("\"p\".\"standardcost\" > \"p\".\"listprice\"") =! true
+
+[<Test>]
+let ``Phase3: caseWhenMulti emits multi-branch CASE`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select (caseWhenMulti [
+                        (p.standardcost > 1000m, "premium")
+                        (p.standardcost > 100m, "standard")
+                    ] "budget")
+        }
+        |> toSql
+    sql.Contains("CASE") =! true
+    sql.Contains("WHEN") =! true
+    sql.Contains("'premium'") =! true
+    sql.Contains("'standard'") =! true
+    sql.Contains("ELSE 'budget'") =! true
+
+[<Test>]
+let ``Phase3: rawExpr injects raw SQL into select`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select (rawExpr<int> "EXTRACT(YEAR FROM CURRENT_DATE)")
+        }
+        |> toSql
+    sql.Contains("EXTRACT(YEAR FROM CURRENT_DATE)") =! true
+
+[<Test>]
+let ``Phase3: lateralCol qualifies a lateral subquery column`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select (lateralCol<int> "lat" "score")
+        }
+        |> toSql
+    sql.Contains("\"lat\".\"score\"") =! true
+
+[<Test>]
+let ``Phase3: PgSqlFn.interval emits INTERVAL literal`` () =
+    let sql =
+        select {
+            for p in production.product do
+            select (PgSqlFn.interval "7 days")
+        }
+        |> toSql
+    sql.Contains("INTERVAL '7 days'") =! true
+
+[<Test>]
+let ``Phase3: nested aggregate-in-aggregate (MAX(SUM(x)))`` () =
+    // SUM-of-aggregate — not common, but tests the recursive renderAggregate path.
+    let sql =
+        select {
+            for p in production.product do
+            groupBy p.standardcost
+            select (castAs<float> (sumBy p.listprice))
+        }
+        |> toSql
+    sql.Contains("CAST(SUM(") =! true
+    sql.Contains("AS FLOAT") =! true
