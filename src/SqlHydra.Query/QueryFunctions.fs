@@ -131,10 +131,16 @@ module CaseWhenFunctions =
 module RawExpressions =
     /// Reference a column from a lateral subquery by alias and column name (raw quoted).
     /// Example: lateralCol "lat" "score" → "lat"."score"
-    let lateralCol<'T> (alias: string) (column: string) : 'T = Unchecked.defaultof<'T>
+    let lateralCol<'T> (_alias: string) (_column: string) : 'T = Unchecked.defaultof<'T>
 
     /// Inject a raw SQL expression into a select projection. Use sparingly.
-    let rawExpr<'T> (sql: string) : 'T = Unchecked.defaultof<'T>
+    let rawExpr<'T> (_sql: string) : 'T = Unchecked.defaultof<'T>
+
+    /// Wrap an external value so it's emitted as a SQL parameter inside a select expression
+    /// (rather than being treated as a column reference). Use for literals/captured variables
+    /// inside `caseWhen`, `castAs`, infix operator args, etc.
+    /// Example: caseWhen (col > 0) (inlineValue "yes") (inlineValue "no")
+    let inlineValue<'T> (_value: 'T) : 'T = Unchecked.defaultof<'T>
 
 /// Assembly-level attribute that registers a SQL function name as an infix operator.
 /// Extension packages (e.g. SqlHydra.Query.Pgvector) apply this attribute on themselves and

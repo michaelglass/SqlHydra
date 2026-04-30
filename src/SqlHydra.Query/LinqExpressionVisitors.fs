@@ -492,11 +492,19 @@ let private compileAndEval (e: Expression) =
 let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Expression) : string =
     /// Render an arbitrary expression as a SQL fragment (literals inline, columns qualified, nested fns recursed).
     /// Supports: Member columns, static-field Members, Constants, Unary Convert, Binary arithmetic/compare, MethodCall.
+    /// `inlineValue x` is rendered as the value's literal form (numeric/string).
     let rec renderExpr (arg: Expression) : string =
         match arg with
         // Unwrap implicit numeric conversions (e.g., int → float when a column type widens).
         | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
             renderExpr u.Operand
+        // inlineValue marker: compile-and-eval the inner expression and emit as a literal.
+        | MethodCall m when m.Method.Name = nameof inlineValue && m.Arguments.Count = 1 ->
+            match compileAndEval m.Arguments.[0] with
+            | null -> "NULL"
+            | :? string as s -> $"'{s}'"
+            | :? bool as b -> if b then "TRUE" else "FALSE"
+            | v -> sprintf "%O" v
         | Member mem when mem.Expression <> null ->
             let alias = visitAlias mem.Expression
             qualifyColumn alias mem.Member
