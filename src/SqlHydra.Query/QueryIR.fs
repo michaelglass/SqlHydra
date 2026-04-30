@@ -39,10 +39,9 @@ type OrderByClause =
     | OrderByColumn of column: string * direction: OrderDirection
     /// ORDER BY column with explicit NULLS FIRST/LAST.
     | OrderByColumnNulls of column: string * direction: OrderDirection * nulls: NullsOrdering
-    | OrderByRaw of fragment: string
-    /// ORDER BY raw fragment with bound parameters. `?` placeholders are replaced by parameter
-    /// names in order. Used by pgvector distance ordering and similar parameterized expressions.
-    | OrderByRawWithParams of fragment: string * parameters: obj[]
+    /// ORDER BY raw fragment, optionally with `?` placeholders bound to `parameters` in order.
+    /// Pass `[||]` when there are no parameters.
+    | OrderByRaw of fragment: string * parameters: obj[]
 
 /// A SELECT column.
 type SelectColumn =
@@ -50,10 +49,9 @@ type SelectColumn =
     | AllColumns of tableAlias: string
     /// Select a specific column: alias.column
     | SpecificColumn of qualifiedName: string
-    /// Raw SQL expression (e.g., COUNT(*), aggregate AS alias)
-    | RawColumn of fragment: string
-    /// Raw SQL expression with bound parameters. `?` placeholders are replaced by parameter names in order.
-    | RawColumnWithParams of fragment: string * parameters: obj[]
+    /// Raw SQL expression, optionally with `?` placeholders bound to `parameters` in order.
+    /// Pass `[||]` when there are no parameters (e.g. `COUNT(*)`).
+    | RawColumn of fragment: string * parameters: obj[]
 
 // ─── Mutually recursive types ───
 // SqlValue, WhereClause, JoinClause, and SelectQueryIR reference each other.
@@ -149,9 +147,6 @@ and SelectQueryIR = {
     DistinctOn: string list
     /// SELECT COUNT(*) flag
     IsCount: bool
-    /// Carrier for DELETE ... RETURNING column list when this IR is being used by the DELETE builder.
-    /// Ignored when emitting SELECT.
-    Returning: string list
 }
 
 /// Helpers for composing WhereClause values.
@@ -189,7 +184,6 @@ module SelectQueryIR =
         Distinct = false
         DistinctOn = []
         IsCount = false
-        Returning = []
     }
 
 // ─── Insert-related types ───

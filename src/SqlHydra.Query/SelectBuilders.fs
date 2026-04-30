@@ -189,7 +189,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     // Select a single column
                     { ir with Select = ir.Select @ [SpecificColumn $"%s{tableAlias}.%s{column}"] }
                 | LinqExpressionVisitors.SelectedExpression sqlFragment ->
-                    { ir with Select = ir.Select @ [RawColumn sqlFragment] }
+                    { ir with Select = ir.Select @ [RawColumn (sqlFragment, [||])] }
             ) state.Query
 
         QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)
@@ -206,7 +206,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     [OrderByColumn (fqCol, Asc)]
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"{{%s{tableAlias}}}.{{%s{p.Name}}}"
-                    [OrderByRaw (LinqExpressionVisitors.renderAggregate aggType fqCol)]
+                    [OrderByRaw (LinqExpressionVisitors.renderAggregate aggType fqCol, [||])]
                 | LinqExpressionVisitors.OrderByIgnored ->
                     []
         QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ newOrderBy }, state.TableMappings)
@@ -228,7 +228,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     [OrderByColumn (fqCol, Desc)]
                 | LinqExpressionVisitors.OrderByAggregateColumn (aggType, tableAlias, p) ->
                     let fqCol = $"{{%s{tableAlias}}}.{{%s{p.Name}}}"
-                    [OrderByRaw $"{LinqExpressionVisitors.renderAggregate aggType fqCol} DESC"]
+                    [OrderByRaw ($"{LinqExpressionVisitors.renderAggregate aggType fqCol} DESC", [||])]
                 | LinqExpressionVisitors.OrderByIgnored ->
                     []
         QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ newOrderBy }, state.TableMappings)
@@ -242,19 +242,19 @@ type SelectBuilder<'Selected, 'Mapped> () =
     [<CustomOperation("orderByRaw", MaintainsVariableSpace = true)>]
     member this.OrderByRaw (state: QuerySource<'T, SelectQueryIR>, fragment: string) =
         let ir = state.Query
-        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw fragment] }, state.TableMappings)
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw (fragment, [||])] }, state.TableMappings)
 
     /// ORDER BY a column alias (raw, quoted). Use for computed/aliased columns produced in select.
     [<CustomOperation("orderByAlias", MaintainsVariableSpace = true)>]
     member this.OrderByAlias (state: QuerySource<'T, SelectQueryIR>, alias: string) =
         let ir = state.Query
-        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw $"\"{alias}\""] }, state.TableMappings)
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw ($"\"{alias}\"", [||])] }, state.TableMappings)
 
     /// ORDER BY a column alias DESC (raw, quoted).
     [<CustomOperation("orderByAliasDesc", MaintainsVariableSpace = true)>]
     member this.OrderByAliasDesc (state: QuerySource<'T, SelectQueryIR>, alias: string) =
         let ir = state.Query
-        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw $"\"{alias}\" DESC"] }, state.TableMappings)
+        QuerySource<'T, SelectQueryIR>({ ir with OrderBy = ir.OrderBy @ [OrderByRaw ($"\"{alias}\" DESC", [||])] }, state.TableMappings)
 
     /// Adds NULLS LAST to the most recent ORDER BY clause.
     [<CustomOperation("nullsLast", MaintainsVariableSpace = true)>]
@@ -268,8 +268,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     match last with
                     | OrderByColumn (col, dir) -> OrderByColumnNulls (col, dir, NullsLast)
                     | OrderByColumnNulls (col, dir, _) -> OrderByColumnNulls (col, dir, NullsLast)
-                    | OrderByRaw frag -> OrderByRaw $"{frag} NULLS LAST"
-                    | OrderByRawWithParams (frag, parms) -> OrderByRawWithParams ($"{frag} NULLS LAST", parms)
+                    | OrderByRaw (frag, parms) -> OrderByRaw ($"{frag} NULLS LAST", parms)
                 init @ [updated]
             | None -> ir.OrderBy
         QuerySource<'T, SelectQueryIR>({ ir with OrderBy = newOrderBy }, state.TableMappings)
@@ -286,8 +285,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     match last with
                     | OrderByColumn (col, dir) -> OrderByColumnNulls (col, dir, NullsFirst)
                     | OrderByColumnNulls (col, dir, _) -> OrderByColumnNulls (col, dir, NullsFirst)
-                    | OrderByRaw frag -> OrderByRaw $"{frag} NULLS FIRST"
-                    | OrderByRawWithParams (frag, parms) -> OrderByRawWithParams ($"{frag} NULLS FIRST", parms)
+                    | OrderByRaw (frag, parms) -> OrderByRaw ($"{frag} NULLS FIRST", parms)
                 init @ [updated]
             | None -> ir.OrderBy
         QuerySource<'T, SelectQueryIR>({ ir with OrderBy = newOrderBy }, state.TableMappings)

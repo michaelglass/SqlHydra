@@ -99,6 +99,16 @@ type UpdateQuerySpec<'T, 'UpdateReturn> =
         { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; RawSetValues = []
           Where = WhereClause.Empty; OutputFields = []; UpdateAll = false; Returning = [] }
 
+type DeleteQuerySpec<'T> =
+    {
+        Table: string
+        Where: WhereClause
+        DeleteAll: bool
+        Returning: string list
+    }
+    static member Default : DeleteQuerySpec<'T> =
+        { Table = ""; Where = WhereClause.Empty; DeleteAll = false; Returning = [] }
+
 type QuerySource<'T>(tableMappings) =
     interface IEnumerable<'T> with
         member this.GetEnumerator() = Seq.empty<'T>.GetEnumerator() :> Collections.IEnumerator
