@@ -153,6 +153,16 @@ type SqlEmitterBase() =
             for (_, v) in compiled.Parameters do
                 collector.Add(v) |> ignore
             $"{this.QuoteColumn(col)} NOT IN ({compiled.Sql})"
+        | Exists subquery ->
+            let compiled = this.EmitSelectCore(subquery)
+            for (_, v) in compiled.Parameters do
+                collector.Add(v) |> ignore
+            $"EXISTS ({compiled.Sql})"
+        | NotExists subquery ->
+            let compiled = this.EmitSelectCore(subquery)
+            for (_, v) in compiled.Parameters do
+                collector.Add(v) |> ignore
+            $"NOT EXISTS ({compiled.Sql})"
         | Like (col, pattern) ->
             let quotedCol = this.QuoteColumn(col)
             let paramName = collector.Add(pattern)
@@ -193,9 +203,27 @@ type SqlEmitterBase() =
         let collector = this.CreateCollector()
         let sb = StringBuilder()
 
+        // WITH (CTEs)
+        if ir.WithCtes.Length > 0 then
+            sb.Append("WITH ") |> ignore
+            ir.WithCtes
+            |> List.mapi (fun i (alias, cteIR) ->
+                let cteCompiled = this.EmitSelectCore(cteIR)
+                for (_, v) in cteCompiled.Parameters do
+                    collector.Add(v) |> ignore
+                $"{this.QuoteIdentifier(alias)} AS ({cteCompiled.Sql})"
+            )
+            |> String.concat ", "
+            |> sb.Append |> ignore
+            sb.Append(" ") |> ignore
+
         // SELECT
         sb.Append("SELECT ") |> ignore
-        if ir.Distinct then sb.Append("DISTINCT ") |> ignore
+        if ir.DistinctOn.Length > 0 then
+            let cols = ir.DistinctOn |> List.map this.QuoteColumn |> String.concat ", "
+            sb.Append($"DISTINCT ON ({cols}) ") |> ignore
+        elif ir.Distinct then
+            sb.Append("DISTINCT ") |> ignore
 
         if ir.IsCount then
             sb.Append("COUNT(*) AS ") |> ignore
@@ -211,6 +239,14 @@ type SqlEmitterBase() =
                     | AllColumns alias -> $"{this.QuoteIdentifier(alias)}.*"
                     | SpecificColumn name -> this.QuoteColumn(name)
                     | RawColumn fragment -> this.QuoteRawFragment(fragment)
+                    | RawColumnWithParams (fragment, parms) ->
+                        let mutable result = this.QuoteRawFragment(fragment)
+                        for p in parms do
+                            let name = collector.Add(p)
+                            let idx = result.IndexOf("?")
+                            if idx >= 0 then
+                                result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
+                        result
                 )
                 |> String.concat ", "
                 |> sb.Append |> ignore
@@ -228,7 +264,17 @@ type SqlEmitterBase() =
                 match join.Kind with
                 | InnerJoin -> "INNER JOIN"
                 | LeftJoin -> "LEFT JOIN"
-            sb.Append($" {joinKeyword} {this.QuoteTableSpec(join.Table)} ON ") |> ignore
+                | LeftJoinLateral -> "LEFT JOIN LATERAL"
+            let tableSpec =
+                match join.Subquery with
+                | Some subIR ->
+                    let compiled = this.EmitSelectCore(subIR)
+                    for (_, v) in compiled.Parameters do
+                        collector.Add(v) |> ignore
+                    $"({compiled.Sql}) AS {this.QuoteIdentifier(join.Table)}"
+                | None ->
+                    this.QuoteTableSpec(join.Table)
+            sb.Append($" {joinKeyword} {tableSpec} ON ") |> ignore
             let condSql = this.EmitWhere(join.Condition, collector)
             sb.Append(condSql) |> ignore
 
@@ -249,12 +295,19 @@ type SqlEmitterBase() =
 
         // ORDER BY
         if ir.OrderBy.Length > 0 then
+            let nullsSuffix nulls =
+                match nulls with
+                | NullsDefault -> ""
+                | NullsFirst -> " NULLS FIRST"
+                | NullsLast -> " NULLS LAST"
             let orderCols =
                 ir.OrderBy
                 |> List.map (fun ob ->
                     match ob with
                     | OrderByColumn (col, Asc) -> this.QuoteColumn(col)
                     | OrderByColumn (col, Desc) -> $"{this.QuoteColumn(col)} DESC"
+                    | OrderByColumnNulls (col, Asc, nulls) -> $"{this.QuoteColumn(col)}{nullsSuffix nulls}"
+                    | OrderByColumnNulls (col, Desc, nulls) -> $"{this.QuoteColumn(col)} DESC{nullsSuffix nulls}"
                     | OrderByRaw fragment -> this.QuoteRawFragment(fragment)
                 )
                 |> String.concat ", "
@@ -277,10 +330,19 @@ type SqlEmitterBase() =
         let collector = this.CreateCollector()
 
         let baseSql =
-            match ir.Rows with
-            | [] -> failwith "At least one row must be provided for INSERT."
-            | [ row ] -> this.EmitSingleInsert(ir.Table, ir.Columns, row, collector)
-            | rows -> this.EmitMultiRowInsert(ir.Table, ir.Columns, rows, collector)
+            match ir.FromSelect with
+            | Some selectIR ->
+                let quotedTable = this.QuoteDotted(ir.Table)
+                let quotedCols = ir.Columns |> List.map this.QuoteIdentifier |> String.concat ", "
+                let compiled = this.EmitSelectCore(selectIR)
+                for (_, v) in compiled.Parameters do
+                    collector.Add(v) |> ignore
+                $"INSERT INTO {quotedTable} ({quotedCols}) {compiled.Sql}"
+            | None ->
+                match ir.Rows with
+                | [] -> failwith "At least one row must be provided for INSERT."
+                | [ row ] -> this.EmitSingleInsert(ir.Table, ir.Columns, row, collector)
+                | rows -> this.EmitMultiRowInsert(ir.Table, ir.Columns, rows, collector)
 
         // Apply conflict handling
         let withConflict = this.EmitInsertConflict(ir.InsertType, baseSql, ir.Columns, ir.Rows, collector)
@@ -292,7 +354,10 @@ type SqlEmitterBase() =
             else
                 withConflict
 
-        { Sql = withOutput; Parameters = collector.Parameters }
+        // Apply RETURNING (provider hook)
+        let withReturning = this.EmitReturning(ir.Returning, withOutput)
+
+        { Sql = withReturning; Parameters = collector.Parameters }
 
     /// Emits an UPDATE query.
     member this.EmitUpdateCore(ir: UpdateQueryIR) : CompiledQuery =
@@ -308,8 +373,20 @@ type SqlEmitterBase() =
                 let paramName = collector.Add(value)
                 $"{this.QuoteIdentifier(col)} = {paramName}"
             )
-            |> String.concat ", "
-        sb.Append(setClauses) |> ignore
+
+        let rawSetClauses =
+            ir.SetRaws
+            |> List.map (fun (col, fragment, parms) ->
+                let mutable result = this.QuoteRawFragment(fragment)
+                for p in parms do
+                    let name = collector.Add(p)
+                    let idx = result.IndexOf("?")
+                    if idx >= 0 then
+                        result <- result.Substring(0, idx) + name + result.Substring(idx + 1)
+                $"{this.QuoteIdentifier(col)} = {result}"
+            )
+
+        sb.Append(setClauses @ rawSetClauses |> String.concat ", ") |> ignore
 
         // WHERE
         let whereSql = this.EmitWhere(ir.Where, collector)
@@ -325,7 +402,10 @@ type SqlEmitterBase() =
             else
                 baseSql
 
-        { Sql = withOutput; Parameters = collector.Parameters }
+        // Apply RETURNING
+        let withReturning = this.EmitReturning(ir.Returning, withOutput)
+
+        { Sql = withReturning; Parameters = collector.Parameters }
 
     /// Emits a DELETE query.
     member this.EmitDeleteCore(ir: DeleteQueryIR) : CompiledQuery =
@@ -339,7 +419,10 @@ type SqlEmitterBase() =
         if whereSql <> "" then
             sb.Append($" WHERE {whereSql}") |> ignore
 
-        { Sql = sb.ToString(); Parameters = collector.Parameters }
+        let baseSql = sb.ToString()
+        let withReturning = this.EmitReturning(ir.Returning, baseSql)
+
+        { Sql = withReturning; Parameters = collector.Parameters }
 
     // Default implementations for abstract members
 
@@ -361,6 +444,10 @@ type SqlEmitterBase() =
 
     /// Default: no conflict handling.
     default _.EmitInsertConflict(_, insertSql, _, _, _) = insertSql
+
+    /// Append a RETURNING clause (PostgreSQL/SQLite). Default: no-op.
+    abstract EmitReturning: returning: string list * sql: string -> string
+    default _.EmitReturning(_, sql) = sql
 
     /// Default: no output clause.
     default _.EmitInsertOutput(_, insertSql) = insertSql

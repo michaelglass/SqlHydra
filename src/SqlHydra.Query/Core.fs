@@ -199,8 +199,10 @@ module internal QueryUtils =
         {
             Table = spec.Table
             SetColumns = kvps
+            SetRaws = []
             Where = spec.Where
             OutputFields = spec.OutputFields
+            Returning = []
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
@@ -231,9 +233,11 @@ module internal QueryUtils =
                 Table = spec.Table
                 Columns = columns
                 Rows = rows
+                FromSelect = None
                 IdentityField = spec.IdentityField
                 InsertType = spec.InsertType
                 OutputFields = spec.OutputFields
+                Returning = []
             }
 
     /// Fails if `getId` identity field is used as an `onConflict` target.
