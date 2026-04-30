@@ -1,14 +1,26 @@
 # v4 Port — Status
 
 Branch `feature/postgres-enhancements-v4` from `upstream/replace-sqlkata` (v4.0.0-beta.3).
+**32 commits** since base.
 
-## Done — Phases 1, 2, 3a, 3b, 4
+## Test results
 
-8 commits. **All passing test counts:**
-- 247/247 unit tests on net10.0
-- 102/102 Npgsql tests including integration vs Postgres
-- 61/61 Sqlite tests
-- SqlServer/Oracle units pass; integration failures are infra-only (no MSSQL/Oracle server running locally)
+- **253/253** unit tests on net10.0
+- **1110/1117 (99.4%)** integration tests in thellma/intelligence (real consumer)
+- 7 remaining failures cluster in 2 query functions (EngagementAnalytics, DisengagementAlert) using deeply nested `correlate` + `leftJoin'` + lateral subquery + CASE WHEN with aggregate arithmetic patterns
+
+## Integration journey (intelligence/ consumer)
+
+| Stage | Failures |
+|---|---|
+| Initial integration build | hundreds of compile errors (NoComparison, FS1182, missing API surface) |
+| API surface ported (inlineValue, SqlFn.greatest/least, subquery, composable ON CONFLICT) | builds clean |
+| First test run | 46/1117 |
+| `Returning` tuple support + ON CONFLICT COALESCE table-qualifier | 24 |
+| Float-literal preservation + infix-precedence parens + ExecReturning empty result | 19 |
+| `ExecReturning` mode for INSERT…RETURNING tuples + Set/List/Array.Contains in where | 17 |
+| Anonymous record AS-aliasing + tuple positional skip + F# pivot inlining | 7 |
+| Visitor: outer-scope columns in lateral subqueries, .Value-chain aggregates | **7** (current) |
 
 ### Phase 1 — IR foundation (commit `5abce07`)
 
