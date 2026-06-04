@@ -302,18 +302,9 @@ module SqlPatterns =
         match exp with
         | MethodCall m when aggregateMethodNames.Contains m.Method.Name ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
-            // First argument may be a direct Property `col` or an Option/Nullable Value chain
-            // like `opt.Value.col` (after a leftJoin'). Recurse through wrappers to find the
-            // underlying column property.
-            let rec unwrapToProperty (e: Expression) =
-                match e with
-                | Property (p, ext) -> Some (p, ext)
-                | Member m when m.Expression <> null -> unwrapToProperty m.Expression
-                | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert -> unwrapToProperty u.Operand
-                | _ -> None
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
-            | other -> unwrapToProperty other |> Option.map (fun p -> aggType, p)
+            | _ -> notImplMsg "Invalid argument to aggregate function."
         | _ -> None
 
 // ─── NormalizedExpression Patterns ───────────────────────────────────────────
@@ -420,15 +411,9 @@ module NormalizedPatterns =
         match nexp with
         | NMethodCall(m, _) when aggregateMethodNames.Contains m.Method.Name ->
             let aggType = m.Method.Name.Replace("By", "").Replace("As", "").ToUpper()
-            let rec unwrapToProperty (e: Expression) =
-                match e with
-                | Property (p, ext) -> Some (p, ext)
-                | Member m when m.Expression <> null -> unwrapToProperty m.Expression
-                | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert -> unwrapToProperty u.Operand
-                | _ -> None
             match m.Arguments.[0] with
             | Property p -> Some (aggType, p)
-            | other -> unwrapToProperty other |> Option.map (fun p -> aggType, p)
+            | _ -> notImplMsg "Invalid argument to aggregate function."
         | _ -> None
 
     /// List initializer — delegates to original ListInit pattern.
@@ -688,7 +673,6 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
     let nEvaluate (nexp: NormalizedExpression) =
         match nexp with
         | NValue v -> v
-        | NConstant(v, _) -> v
         | NMemberAccess(_, m) -> compileAndEvaluateExpression (m :> Expression)
         | NMethodCall(m, _) -> compileAndEvaluateExpression (m :> Expression)
         | NUnknown exp -> compileAndEvaluateExpression exp
