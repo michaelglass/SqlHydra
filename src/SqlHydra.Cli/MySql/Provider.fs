@@ -12,4 +12,5 @@ let instance: ISqlHydraDbProvider =
         member _.SqlEmitter = "SqlHydra.Query.MySqlEmitter()"
         member _.ProviderConnectionType = "MySql.Data.MySqlClient.MySqlConnection"
         member _.GetSchema(cfg, isLegacy, extensions) = MySqlSchemaProvider.getSchema(cfg, isLegacy, extensions)
+        member _.RenderEnumRegistration(_, _) = None
     }

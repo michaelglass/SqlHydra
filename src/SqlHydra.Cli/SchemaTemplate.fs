@@ -133,6 +133,13 @@ namespace {{cfg.Namespace}}
                     newLine
         }
 
+    // Provider-agnostic enum registration. Each provider decides what (if anything) to emit.
+    match provider.RenderEnumRegistration(cfg, db) with
+    | Some registration ->
+        newLine
+        registration
+    | None -> ()
+
     // If the user configures ProviderDbTypeAttributes, we know they are using SqlHydra.Query.
     if cfg.ProviderDbTypeAttributes then
         let emitter = provider.SqlEmitter

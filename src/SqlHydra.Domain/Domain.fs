@@ -211,3 +211,7 @@ type ISqlHydraDbProvider =
     abstract member SqlEmitter: string
     abstract member ProviderConnectionType: string
     abstract member GetSchema: cfg: Config * isLegacy: bool * extensions: IExtendTypeMapping list -> Schema
+
+    /// Renders provider-specific enum registration code to be emitted at namespace
+    /// level in the generated output, or None if the provider has nothing to emit.
+    abstract member RenderEnumRegistration: cfg: Config * db: Schema -> string option

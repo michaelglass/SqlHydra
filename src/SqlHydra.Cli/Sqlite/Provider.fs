@@ -12,4 +12,5 @@ let instance: ISqlHydraDbProvider =
         member _.SqlEmitter = "SqlHydra.Query.SqliteEmitter()"
         member _.ProviderConnectionType = "Microsoft.Data.Sqlite.SqliteConnection"
         member _.GetSchema(cfg, isLegacy, extensions) = SqliteSchemaProvider.getSchema(cfg, isLegacy, extensions)
+        member _.RenderEnumRegistration(_, _) = None
     }

@@ -12,4 +12,5 @@ let instance: ISqlHydraDbProvider =
         member _.SqlEmitter = "SqlHydra.Query.OracleEmitter()"
         member _.ProviderConnectionType = "Oracle.ManagedDataAccess.Client.OracleConnection"
         member _.GetSchema(cfg, isLegacy, extensions) = OracleSchemaProvider.getSchema(cfg, isLegacy, extensions)
+        member _.RenderEnumRegistration(_, _) = None
     }
