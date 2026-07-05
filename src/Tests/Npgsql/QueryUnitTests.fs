@@ -1327,3 +1327,84 @@ let ``an unmarked .NET call in a where is still evaluated``() =
         |> toSql
     sql.Contains("@p") =! true
     sql.Contains("UPPER") =! false
+
+// ==========================================
+// Read-only system columns ([<SystemColumn>], e.g. Postgres xmin).
+// A hand-written fixture that maps to the real `sales.currency` table but adds an
+// xmin field, mirroring what the generator emits when `system_columns = ["xmin"]`.
+// ==========================================
+
+module SystemColumnFixture =
+    module sales =
+        [<CLIMutable>]
+        type currency =
+            { [<SqlHydra.ProviderDbType("Char")>]
+              currencycode: string
+              [<SqlHydra.ProviderDbType("Varchar")>]
+              name: string
+              [<SqlHydra.ProviderDbType("Timestamp")>]
+              modifieddate: System.DateTime
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Xid")>]
+              xmin: uint }
+
+    let currency = table<sales.currency>
+
+    let sampleRow : sales.currency =
+        { currencycode = "BTC"; name = "BitCoin"; modifieddate = DateTime.Today; xmin = 0u }
+
+[<Test>]
+let ``system column: whole-entity select appends xmin explicitly``() =
+    let sql =
+        select {
+            for c in SystemColumnFixture.currency do
+            select c
+        }
+        |> toSql
+    // `"c".*` excludes xmin, so it must be appended by name.
+    sql.Contains("SELECT \"c\".*, \"c\".\"xmin\" FROM \"sales\".\"currency\" AS \"c\"") =! true
+
+[<Test>]
+let ``system column: insert excludes xmin from the column list``() =
+    let sql =
+        insert {
+            into SystemColumnFixture.currency
+            entity SystemColumnFixture.sampleRow
+        }
+        |> toInsertSql
+    sql =! "INSERT INTO \"sales\".\"currency\" (\"currencycode\", \"name\", \"modifieddate\") VALUES (@p0, @p1, @p2)"
+    sql.Contains("xmin") =! false
+
+[<Test>]
+let ``system column: entity update excludes xmin from the SET clause``() =
+    let sql =
+        update {
+            for c in SystemColumnFixture.currency do
+            entity SystemColumnFixture.sampleRow
+            where (c.currencycode = "BTC")
+        }
+        |> toUpdateSql
+    sql.Contains("SET") =! true
+    sql.Contains("xmin") =! false
+
+[<Test>]
+let ``system column: xmin is usable in a where predicate``() =
+    let sql =
+        select {
+            for c in SystemColumnFixture.currency do
+            where (c.currencycode = "BTC" && c.xmin = 42u)
+        }
+        |> toSql
+    sql.Contains("\"c\".\"xmin\" = @p") =! true
+
+[<Test>]
+let ``system column: guarded update sets a normal column and guards on xmin``() =
+    // The clean optimistic-concurrency shape: UPDATE ... SET name = @p WHERE code = @p AND xmin = @p.
+    let sql =
+        update {
+            for c in SystemColumnFixture.currency do
+            set c.name "BitCoinzz"
+            where (c.currencycode = "BTC" && c.xmin = 42u)
+        }
+        |> toUpdateSql
+    sql =! """UPDATE "sales"."currency" SET "name" = @p0 WHERE (("sales"."currency"."currencycode" = @p1) AND ("sales"."currency"."xmin" = @p2))"""

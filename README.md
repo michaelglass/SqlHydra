@@ -702,6 +702,49 @@ let factory = QueryContextFactory.Create(dataSource)
 
 **Arrays:** `text[]` and `integer[]` column types are supported.
 
+**Read-only system columns (`xmin` — optimistic concurrency):** PostgreSQL system columns
+(such as the per-row version `xmin`) are not returned by `SELECT *` and are managed by the database,
+so they can't be exposed as ordinary generated columns. Opt in per generation run via the
+`[sqlhydra_query_integration]` TOML section:
+
+```toml
+[sqlhydra_query_integration]
+provider_db_type_attributes = true
+system_columns = ["xmin"]   # also supports "xmax"
+```
+
+Each named column is added to every generated table record as a read-only `uint` field tagged
+`[<SystemColumn>]` (plus `[<ProviderDbType("Xid")>]`). SqlHydra.Query then:
+
+* **selects it explicitly** — a whole-entity `select r` emits `SELECT r.*, r."xmin"` so the field hydrates,
+* **never inserts or updates it** — it is excluded from every INSERT column list and UPDATE `SET` clause,
+* **lets you filter on it** — usable in a `where` predicate, e.g. a lock-free optimistic-concurrency guard:
+
+```fsharp
+// Read the current row (xmin hydrates alongside the normal columns).
+let! current =
+    selectTask db {
+        for r in myschema.my_table do
+        where (r.id = id)
+        select r
+    }
+let row = current |> Seq.exactlyOne
+
+// Guarded update: only succeeds if the row version is unchanged (returns 0 rows on a conflict).
+let expectedXmin = row.xmin
+let! rowsAffected =
+    updateTask db {
+        for r in myschema.my_table do
+        set r.name "new value"
+        where (r.id = id && r.xmin = expectedXmin)
+    }
+// rowsAffected = 0 means another writer won the race — reload and retry.
+```
+
+> Note: `where` compares against a pre-computed value (`expectedXmin`), not an inline expression.
+> `xmin` is a 32-bit transaction id and can wrap/reset under `VACUUM FREEZE`; treat it as a
+> short-lived concurrency token, not durable state.
+
 ### SQLite
 
 SQLite uses type affinity. Use standard type aliases in your schema for proper .NET type mapping.

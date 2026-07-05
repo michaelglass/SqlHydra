@@ -2,8 +2,8 @@
 
 open System.Data
 
-let private valueTypes = 
-    Set [ "bool"; "int"; "int64"; "int16"; "byte"; "decimal"; "double"; "System.Single"
+let private valueTypes =
+    Set [ "bool"; "int"; "int64"; "int16"; "byte"; "uint"; "System.UInt32"; "decimal"; "double"; "System.Single"
           "System.DateTimeOffset"; "System.DateTime"; "System.DateOnly"; "System.TimeOnly"
           "System.Guid"; ]
 
@@ -42,12 +42,16 @@ type TypeMapping =
     member this.IsValueType() = 
         isValueType this.ClrType
 
-type Column = 
+type Column =
     {
         Name: string
         TypeMapping: TypeMapping
         IsNullable: bool
         IsPK: bool
+        /// True for read-only, database-managed *system columns* (e.g. PostgreSQL `xmin`).
+        /// Such columns are generated with a `[<SystemColumn>]` attribute so SqlHydra.Query
+        /// selects them explicitly but never inserts/updates them.
+        IsReadOnly: bool
     }
 
 type TableType = 
@@ -130,6 +134,12 @@ type Config =
         
         /// SqlHydra.Query Integration: creates a SqlHydra.Query table declaration for each table
         TableDeclarations: bool
+
+        /// Read-only system columns to generate for each table, in addition to the ordinary
+        /// user columns (PostgreSQL only). Each named column is emitted with a `[<SystemColumn>]`
+        /// attribute so SqlHydra.Query selects it explicitly but never inserts/updates it.
+        /// Ex: `[ "xmin" ]` to enable optimistic-concurrency on the row version. Default: empty.
+        SystemColumns: string list
 
         /// Readers: provides a Db provider specific IDataReader type (for access to Db-specific features)
         Readers: ReadersConfig option

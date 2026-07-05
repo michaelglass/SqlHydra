@@ -794,3 +794,96 @@ let ``SqlFn - PostgreSQL functions smoke test``() = task {
     upperName =! "KEN"
     Assert.That(middleName, Is.Not.Null)
 }
+
+// ==========================================
+// Read-only system column (xmin) end-to-end against a live Postgres row.
+// A hand-written fixture that maps to the real `sales.currency` table but adds an
+// xmin field, mirroring what the generator emits when `system_columns = ["xmin"]`.
+// ==========================================
+
+module SystemColumnFixture =
+    module sales =
+        [<CLIMutable>]
+        type currency =
+            { [<SqlHydra.ProviderDbType("Char")>]
+              currencycode: string
+              [<SqlHydra.ProviderDbType("Varchar")>]
+              name: string
+              [<SqlHydra.ProviderDbType("Timestamp")>]
+              modifieddate: System.DateTime
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Xid")>]
+              xmin: uint }
+
+    let currency = table<sales.currency>
+
+[<Test>]
+let ``xmin round-trips and a stale-xmin guarded update touches 0 rows``() = task {
+    use! shared = db.OpenContextAsync()
+
+    let deleteXmn () =
+        deleteAsync shared {
+            for c in SystemColumnFixture.currency do
+            where (c.currencycode = "XMN")
+        }
+
+    let readXmn () =
+        selectTask shared {
+            for c in SystemColumnFixture.currency do
+            where (c.currencycode = "XMN")
+            select c
+        }
+
+    // Clean slate.
+    let! _ = deleteXmn ()
+
+    // INSERT succeeds even though the record carries xmin → proves xmin is excluded from INSERT.
+    let! inserted =
+        insertTask shared {
+            for c in SystemColumnFixture.currency do
+            entity
+                {
+                    SystemColumnFixture.sales.currency.currencycode = "XMN"
+                    SystemColumnFixture.sales.currency.name = "XminCoin"
+                    SystemColumnFixture.sales.currency.modifieddate = System.DateTime.Today
+                    SystemColumnFixture.sales.currency.xmin = 0u
+                }
+        }
+    inserted =! 1
+
+    // Whole-entity read hydrates xmin (a real, non-zero transaction id).
+    let! rows = readXmn ()
+    let row = rows |> Seq.exactlyOne
+    row.xmin >! 0u
+
+    // WHERE values must be pre-computed (SqlHydra doesn't fold inline arithmetic in a predicate).
+    let currentXmin = row.xmin
+    let staleXmin = row.xmin - 1u
+
+    // Guarded UPDATE with a STALE xmin → 0 rows (optimistic-concurrency conflict).
+    let! staleRows =
+        updateTask shared {
+            for c in SystemColumnFixture.currency do
+            set c.name "Stale"
+            where (c.currencycode = "XMN" && c.xmin = staleXmin)
+        }
+    staleRows =! 0
+
+    // Guarded UPDATE with the CURRENT xmin → 1 row.
+    let! freshRows =
+        updateTask shared {
+            for c in SystemColumnFixture.currency do
+            set c.name "Fresh"
+            where (c.currencycode = "XMN" && c.xmin = currentXmin)
+        }
+    freshRows =! 1
+
+    // The write advanced xmin, and only the successful update took effect.
+    let! rows2 = readXmn ()
+    let row2 = rows2 |> Seq.exactlyOne
+    row2.name =! "Fresh"
+    (row2.xmin <> row.xmin) =! true
+
+    let! _ = deleteXmn ()
+    ()
+}

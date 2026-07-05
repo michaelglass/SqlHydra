@@ -219,7 +219,29 @@ module internal QueryUtils =
         p.GetValue(entity)
         |> getQueryParameterForValue p
 
+    /// True when a record field is a read-only, database-managed system column ([<SystemColumn>]).
+    let internal isSystemColumnProp (p: MemberInfo) =
+        Attribute.IsDefined(p, typeof<SqlHydra.SystemColumnAttribute>, false)
+
+    /// Names of record fields marked [<SystemColumn>] on record type `t` (Option/Nullable unwrapped).
+    /// Empty for non-record types. Used to keep read-only system columns (e.g. `xmin`) out of every
+    /// INSERT/UPDATE column list, and to select them explicitly.
+    let internal getSystemColumnNames (t: Type) : Set<string> =
+        let recordType =
+            if t.IsGenericType
+               && (t.GetGenericTypeDefinition() = typedefof<Option<_>>
+                   || t.GetGenericTypeDefinition() = typedefof<Nullable<_>>)
+            then t.GenericTypeArguments.[0]
+            else t
+        if FSharp.Reflection.FSharpType.IsRecord recordType then
+            FSharp.Reflection.FSharpType.GetRecordFields(recordType)
+            |> Array.filter isSystemColumnProp
+            |> Array.map (fun p -> p.Name)
+            |> Set.ofArray
+        else Set.empty
+
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
+        let systemColumns = getSystemColumnNames typeof<'T>
         let kvps =
             match spec.Entity, spec.SetValues with
             | Some entity, [] ->
@@ -241,6 +263,9 @@ module internal QueryUtils =
                 failwith "Either an `entity`, `set`, or `setRaw` operation must be present in an `update` expression."
             | None, setValues -> setValues
 
+        // Read-only system columns (e.g. xmin) are database-managed and can never appear in a SET clause.
+        let kvps = kvps |> List.filter (fun (col, _) -> not (systemColumns.Contains col))
+
         {
             Table = spec.Table
             SetColumns = kvps
@@ -252,6 +277,7 @@ module internal QueryUtils =
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
+        let systemColumns = getSystemColumnNames typeof<'T>
         let includedProperties =
             match spec.Fields with
             | [] ->
@@ -260,6 +286,8 @@ module internal QueryUtils =
                 let included = fields |> Set.ofList
                 FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
                 |> Array.filter (fun p -> included.Contains(p.Name))
+            // Read-only system columns (e.g. xmin) are database-managed and can never be INSERTed.
+            |> Array.filter (fun p -> not (systemColumns.Contains p.Name))
 
         let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
 

@@ -114,3 +114,81 @@ open SqlHydra.Npgsql
 //let ``Code Should Have ProviderDbTypeAttribute With Jsonb``() =
 //    cfg |> inCode "[<ProviderDbType(\"Jsonb\")>]"
 
+// ==========================================
+// Read-only system column ([<SystemColumn>], e.g. xmin) code generation.
+// DB-free: drives SchemaTemplate.generate directly with a synthetic schema.
+// ==========================================
+
+let private systemColumnCfg : Config =
+    {
+        ConnectionString = ""
+        OutputFile = ""
+        Namespace = "TestNS"
+        IsCLIMutable = true
+        IsMutableProperties = false
+        NullablePropertyType = NullablePropertyType.Option
+        ProviderDbTypeAttributes = true
+        TableDeclarations = true
+        SystemColumns = [ "xmin" ]
+        Readers = None
+        Filters = Filters.Empty
+        TypeMappingExtensions = []
+    }
+
+let private systemColumnSchema : Schema =
+    let currencycode =
+        {
+            Column.Name = "currencycode"
+            Column.IsNullable = false
+            Column.IsPK = true
+            Column.IsReadOnly = false
+            Column.TypeMapping =
+                {
+                    TypeMapping.ColumnTypeAlias = "character"
+                    TypeMapping.ClrType = "string"
+                    TypeMapping.DbType = System.Data.DbType.String
+                    TypeMapping.ProviderDbType = Some "Char"
+                }
+        }
+    let xmin =
+        {
+            Column.Name = "xmin"
+            Column.IsNullable = false
+            Column.IsPK = false
+            Column.IsReadOnly = true
+            Column.TypeMapping = NpgsqlDataTypes.systemColumnTypeMappings.["xmin"]
+        }
+    {
+        Tables =
+            [ {
+                Table.Catalog = ""
+                Table.Schema = "sales"
+                Table.Name = "currency"
+                Table.Type = TableType.Table
+                Table.Columns = [ currencycode; xmin ]
+                Table.TotalColumns = 2
+              } ]
+        Enums = []
+    }
+
+let private systemColumnCode () =
+    let version : Version.InformationalVersion =
+        { InformationalVersion = "4.1.0-test"; Version = System.Version(4, 1, 0); PreReleaseSuffix = None }
+    SchemaTemplate.generate systemColumnCfg Provider.instance systemColumnSchema version []
+
+[<Test>]
+let ``Generated read-only column carries [<SystemColumn>] attribute``() =
+    systemColumnCode().Contains("[<SystemColumn>]") =! true
+
+[<Test>]
+let ``Generated read-only xmin column is a uint field``() =
+    systemColumnCode().Contains("xmin: uint") =! true
+
+[<Test>]
+let ``Generated read-only xmin column also carries the Xid ProviderDbType``() =
+    systemColumnCode().Contains("[<ProviderDbType(\"Xid\")>]") =! true
+
+[<Test>]
+let ``Generated table declaration is still emitted for a table with a system column``() =
+    systemColumnCode().Contains("let currency = table<currency>") =! true
+

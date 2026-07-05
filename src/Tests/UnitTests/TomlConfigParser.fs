@@ -23,6 +23,7 @@ let ``Save: All``() =
             NullablePropertyType = NullablePropertyType.Option
             ProviderDbTypeAttributes = true
             TableDeclarations = true
+            SystemColumns = []
             Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
             Filters = Filters.Empty
             TypeMappingExtensions = []
@@ -72,6 +73,7 @@ let ``Read: with no filters``() =
             NullablePropertyType = NullablePropertyType.Option
             ProviderDbTypeAttributes = true
             TableDeclarations = false
+            SystemColumns = []
             Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
             Filters = Filters.Empty
             TypeMappingExtensions = []
@@ -102,6 +104,7 @@ let ``Read: when no readers section should be None``() =
             NullablePropertyType = NullablePropertyType.Option
             ProviderDbTypeAttributes = true
             TableDeclarations = false
+            SystemColumns = []
             Readers = None
             Filters = Filters.Empty
             TypeMappingExtensions = []

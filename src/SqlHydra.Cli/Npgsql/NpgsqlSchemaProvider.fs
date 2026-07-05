@@ -231,6 +231,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
+                            Column.IsReadOnly = false
                         }
                     )
                 )
@@ -288,6 +289,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
+                            Column.IsReadOnly = false
                         }
                     )
                 )
@@ -320,6 +322,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                                 TypeMapping.ProviderDbType = None
                             }
                         Column.IsPK = col.IsPrimaryKey
+                        Column.IsReadOnly = false
                     }
                 )
 
@@ -330,6 +333,25 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                 |> SchemaFilters.filterColumns cfg.Filters tbl.Schema tbl.Name
                 |> Seq.toList
 
+            // Read-only system columns (e.g. xmin) are not returned by information_schema and are
+            // excluded by `SELECT *`, so they are appended here (real tables only) when opted in via
+            // Config.SystemColumns. They are generated with a `[<SystemColumn>]` attribute so
+            // SqlHydra.Query selects them explicitly but never inserts/updates them.
+            let systemColumns =
+                if tbl.Type = "table" then
+                    cfg.SystemColumns
+                    |> List.choose (fun name ->
+                        NpgsqlDataTypes.tryFindSystemColumnTypeMapping name
+                        |> Option.map (fun typeMapping ->
+                            {
+                                Column.Name = name.ToLower().Trim()
+                                Column.IsNullable = false
+                                Column.TypeMapping = typeMapping
+                                Column.IsPK = false
+                                Column.IsReadOnly = true
+                            }))
+                else []
+
             if filteredColumns |> Seq.isEmpty then
                 None
             else
@@ -338,7 +360,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                     Table.Schema = tbl.Schema
                     Table.Name =  tbl.Name
                     Table.Type = if tbl.Type = "table" then TableType.Table else TableType.View
-                    Table.Columns = filteredColumns
+                    Table.Columns = filteredColumns @ systemColumns
                     Table.TotalColumns = tableCols |> List.length
                 }
         )

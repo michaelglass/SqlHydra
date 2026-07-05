@@ -96,3 +96,24 @@ let tryFindTypeMapping isLegacy =
     let map = typeMappingsByName isLegacy
     fun (ctx: TypeMappingContext) ->
         map.TryFind (ctx.Column.ProviderTypeName.ToLower().Trim())
+
+/// Read-only PostgreSQL *system columns* that SqlHydra can generate on demand
+/// (opt in via `Config.SystemColumns`, e.g. `[ "xmin" ]`). Each maps to a CLR type
+/// Npgsql can read and a provider DB type used to bind the value in `where` predicates:
+///   xmin / xmax : `xid` (transaction ids) -> `uint` (NpgsqlDbType.Xid)
+let systemColumnTypeMappings : Map<string, TypeMapping> =
+    [ "xmin", "xid", nameof NpgsqlDbType.Xid
+      "xmax", "xid", nameof NpgsqlDbType.Xid ]
+    |> List.map (fun (name, alias, providerDbType) ->
+        name,
+        {
+            TypeMapping.ColumnTypeAlias = alias
+            TypeMapping.ClrType = "uint"
+            TypeMapping.DbType = DbType.UInt32
+            TypeMapping.ProviderDbType = Some providerDbType
+        })
+    |> Map.ofList
+
+/// Looks up the read-only system-column TypeMapping for a system column name (e.g. "xmin").
+let tryFindSystemColumnTypeMapping (name: string) =
+    systemColumnTypeMappings.TryFind (name.ToLower().Trim())

@@ -205,7 +205,15 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     // Bug fix: temporarily revert to * until option types are properly implemented.
                     // `tableType` was not properly unwrapping option types, causing a runtime error.
                     // For example, left joining a table creates an option type, which should be unwrapped.
-                    { ir with Select = ir.Select @ [AllColumns tableAlias] }
+                    //
+                    // Read-only system columns (e.g. xmin) are excluded by `alias.*`, so they are
+                    // appended explicitly by name here — this is what lets a whole-entity read hydrate
+                    // a [<SystemColumn>] field. Non-system-column tables append nothing (no behavior change).
+                    let systemColumns =
+                        QueryUtils.getSystemColumnNames tableType
+                        |> Set.toList
+                        |> List.map (fun name -> SpecificColumn $"%s{tableAlias}.%s{name}")
+                    { ir with Select = ir.Select @ [AllColumns tableAlias] @ systemColumns }
 
                 | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
                     // Select a single column

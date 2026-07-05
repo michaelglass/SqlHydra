@@ -95,6 +95,9 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
                     | _ ->
                         None
 
+                // Read-only system columns (e.g. xmin) are tagged so SqlHydra.Query selects them
+                // explicitly but never inserts/updates them.
+                if col.IsReadOnly then "[<SystemColumn>]"
                 if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value
                 let colName = columnName { NamingContext.Table = table; Column = Some col }
                 $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks colName}: {columnPropertyType}"""

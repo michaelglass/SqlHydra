@@ -49,6 +49,7 @@ let newConfigWizard (args: Args) =
             Config.NullablePropertyType = NullablePropertyType.Option
             Config.ProviderDbTypeAttributes = true
             Config.TableDeclarations = true
+            Config.SystemColumns = []
             Config.Readers = None
             Config.Filters = Filters.Empty // User must manually configure filter in .toml file
             Config.TypeMappingExtensions = []
