@@ -1239,3 +1239,45 @@ let ``inlineValue emits a SQL literal not a parameter``() =
         |> toSql
     sql.Contains("'yes'") =! true
     sql.Contains("@p") =! false
+
+[<Test>]
+let ``inlineValue in a where emits an escaped literal, not IS NULL``() =
+    // Regression: the `NColumn (p, _), _` catch-all compile-and-evaluated the RHS. A SqlHydra
+    // function's body is `Unchecked.defaultof<_>`, so `inlineValue` evaluated to null and the
+    // comparison silently became `city IS NULL` -- wrong rows returned, and no error raised.
+    // The quote in the value also checks the literal cannot be closed early.
+    let captured = "O'Brien"
+    let sql =
+        select {
+            for a in person.address do
+            where (a.city = inlineValue captured)
+        }
+        |> toSql
+    sql.Contains("'O''Brien'") =! true
+    sql.Contains("IS NULL") =! false
+    sql.Contains("@p") =! false
+
+[<Test>]
+let ``rawExpr on the right of a where comparison is rendered, not evaluated``() =
+    // Same root cause as above: rawExpr's stub body evaluated to null, yielding `IS NULL`.
+    let sql =
+        select {
+            for a in person.address do
+            where (a.city = rawExpr<string> "'Dallas'")
+        }
+        |> toSql
+    sql.Contains("'Dallas'") =! true
+    sql.Contains("IS NULL") =! false
+
+[<Test>]
+let ``SQL function compared to a column``() =
+    // The `NMethodCall, NColumn` / `NColumn, NMethodCall` arms were unreachable: the
+    // `NColumn, _` and `_, NColumn` catch-alls above them matched first, so this threw
+    // "Unable to evaluate where LHS".
+    let sql =
+        select {
+            for a in person.address do
+            where (SqlFn.lower a.city = a.addressline1)
+        }
+        |> toSql
+    sql.Contains("LOWER") =! true

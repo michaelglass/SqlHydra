@@ -8,6 +8,13 @@ open FastExpressionCompiler
 let notImpl() = raise (NotImplementedException())
 let notImplMsg msg = raise (NotImplementedException msg)
 
+/// True when a method call is a SqlHydra query function (`isIn`, `like`, `inlineValue`,
+/// `rawExpr`, `sqlFn` wrappers, ...) rather than an ordinary .NET call.
+/// A SqlHydra function has a stub body (`Unchecked.defaultof<_>`), so evaluating one yields
+/// null/0 rather than anything meaningful: it must be rendered as SQL, never compiled and run.
+let isSqlHydraFunction (mi: MethodInfo) =
+    mi.Module.Name = "SqlHydra.Query.dll"
+
 /// Aggregate method names recognized by the visitor. Used by visitSqlFn / pattern matchers.
 /// Keep in sync with QueryFunctions.Aggregates.
 let aggregateMethodNames =
@@ -297,7 +304,7 @@ module SqlPatterns =
         match exp with
         | Constant c -> Some c.Value
         // Do not try to evaluate QueryFunctions like `isIn`, `isNotIn`, etc.
-        | Call c when c.Method.Module.Name <> "SqlHydra.Query.dll" -> 
+        | Call c when not (isSqlHydraFunction c.Method) ->
             compileAndEvaluateExpression exp |> Some
         | _ -> None
 
@@ -394,7 +401,7 @@ module NormalizedPatterns =
     let (|NValue|_|) (nexp: NormalizedExpression) =
         match nexp with
         | NConstant(v, _) -> Some v
-        | NMethodCall(call, _) when call.Method.Module.Name <> "SqlHydra.Query.dll" ->
+        | NMethodCall(call, _) when not (isSqlHydraFunction call.Method) ->
             compileAndEvaluateExpression (call :> Expression) |> Some
         | NMemberAccess(NConstant _, m) ->
             // Evaluable member access on a constant (e.g., captured variable from closure)
@@ -533,12 +540,18 @@ let private formatNumericLiteral (value: obj) (clrType: System.Type) =
     | t when t.IsPrimitive && t <> typeof<char> && t <> typeof<bool> -> sprintf "%O" value
     | t -> failwithf "Cannot format SQL literal of type %s — wrap with inlineValue or parameterize." t.FullName
 
+/// Renders a string as a SQL literal, doubling embedded single quotes so the value
+/// cannot close the literal early.
+let private renderStringLiteral (s: string) =
+    let escaped = s.Replace("'", "''")
+    $"'{escaped}'"
+
 /// Renders a `ConstantExpression` to a SQL literal. When `handleBool` is true, bool constants
 /// emit `TRUE`/`FALSE`; otherwise they fall through to numeric formatting (matching the
 /// orderBy walker, which never receives bool constants). Shared by the expression walkers.
 let private renderConstant (handleBool: bool) (c: ConstantExpression) =
     if c.Value = null then "NULL"
-    elif c.Type = typeof<string> then $"'{c.Value}'"
+    elif c.Type = typeof<string> then renderStringLiteral (c.Value :?> string)
     elif handleBool && c.Type = typeof<bool> then (if c.Value :?> bool then "TRUE" else "FALSE")
     else formatNumericLiteral c.Value c.Type
 
@@ -547,7 +560,7 @@ let private renderConstant (handleBool: bool) (c: ConstantExpression) =
 let private renderObjAsLiteral (v: obj) =
     match v with
     | null -> "NULL"
-    | :? string as s -> $"'{s}'"
+    | :? string as s -> renderStringLiteral s
     | :? bool as b -> if b then "TRUE" else "FALSE"
     | :? System.Guid as g -> $"'{g}'"
     | :? System.DateTime as dt ->
@@ -571,9 +584,6 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         // Unwrap implicit numeric conversions (e.g., int → float when a column type widens).
         | :? UnaryExpression as u when u.NodeType = ExpressionType.Convert ->
             renderExpr u.Operand
-        // inlineValue marker: compile-and-eval the inner expression and emit as a literal.
-        | MethodCall m when m.Method.Name = nameof inlineValue && m.Arguments.Count = 1 ->
-            renderObjAsLiteral (compileAndEval m.Arguments.[0])
         | Member mem when mem.Expression <> null ->
             let alias = visitAlias mem.Expression
             qualifyColumn alias mem.Member
@@ -612,12 +622,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
                         let cond = t.GetProperty("Item1").GetValue(item) :?> bool
                         let v = t.GetProperty("Item2").GetValue(item)
                         let condStr = if cond then "TRUE" else "FALSE"
-                        let valStr =
-                            match v with
-                            | null -> "NULL"
-                            | :? string as s -> $"'{s}'"
-                            | x -> sprintf "%O" x
-                        yield (condStr, valStr) ]
+                        yield (condStr, renderObjAsLiteral v) ]
                 | _ -> notImplMsg $"Cannot extract caseWhenMulti list: {exp.NodeType}"
             with ex -> notImplMsg $"Cannot extract caseWhenMulti list: {exp.NodeType} ({ex.Message})"
     and extractTuple (exp: Expression) : string * string =
@@ -647,6 +652,9 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
         let alias = compileAndEval m.Arguments.[0] :?> string
         let column = compileAndEval m.Arguments.[1] :?> string
         $"\"{alias}\".\"{column}\""
+    // inlineValue marker: emit the wrapped value as a SQL literal (matches `renderExpr` below).
+    | MethodCall m when m.Method.Name = nameof inlineValue && m.Arguments.Count = 1 ->
+        renderObjAsLiteral (compileAndEval m.Arguments.[0])
     // Raw SQL escape hatch
     | MethodCall m when m.Method.Name = nameof rawExpr && m.Arguments.Count = 1 ->
         compileAndEval m.Arguments.[0] :?> string
@@ -952,6 +960,22 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 let fqCol = qualifyColumn alias m.Value.Member
                 Compare(fqCol, compOp, Parameter queryParameter)
 
+            // Column compared to a SQL function. Must precede the `NColumn, _` / `_, NColumn`
+            // catch-alls below, which compile-and-eval the other side and would otherwise
+            // collapse the comparison to `col IS NULL`.
+            | NColumn (p, _), NMethodCall (m, _) when isSqlHydraFunction m.Method ->
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                let sqlFragment = nVisitSqlFn qualifyColumn right
+                RawWhere($"{fqCol} {comparison} {sqlFragment}", [||])
+
+            // SQL function compared to column
+            | NMethodCall (m, _), NColumn (p, _) when isSqlHydraFunction m.Method ->
+                let sqlFragment = nVisitSqlFn qualifyColumn left
+                let alias = visitAlias p.Expression
+                let fqCol = qualifyColumn alias p.Member
+                RawWhere($"{sqlFragment} {comparison} {fqCol}", [||])
+
             | NColumn (p, _), _ ->
                 let alias = visitAlias p.Expression
                 let fqCol = qualifyColumn alias p.Member
@@ -1008,20 +1032,6 @@ let visitWhere<'T> (tables: TableMapping seq) (filter: Expression<Func<'T, bool>
                 let sqlFragment = nVisitSqlFn qualifyColumn right
                 let reversedComparison = getReverseComparison op
                 RawWhere($"{sqlFragment} {reversedComparison} ?", [| value |])
-
-            // SQL function compared to column
-            | NMethodCall _, NColumn (p, _) ->
-                let sqlFragment = nVisitSqlFn qualifyColumn left
-                let alias = visitAlias p.Expression
-                let fqCol = qualifyColumn alias p.Member
-                RawWhere($"{sqlFragment} {comparison} {fqCol}", [||])
-
-            // Column compared to SQL function
-            | NColumn (p, _), NMethodCall _ ->
-                let alias = visitAlias p.Expression
-                let fqCol = qualifyColumn alias p.Member
-                let sqlFragment = nVisitSqlFn qualifyColumn right
-                RawWhere($"{fqCol} {comparison} {sqlFragment}", [||])
 
             // SQL function compared to SQL function
             | NMethodCall _, NMethodCall _ ->
