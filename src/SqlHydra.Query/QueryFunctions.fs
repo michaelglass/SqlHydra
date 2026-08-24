@@ -142,6 +142,21 @@ module RawExpressions =
     /// Example: caseWhen (col > 0) (inlineValue "yes") (inlineValue "no")
     let inlineValue<'T> (_value: 'T) : 'T = Unchecked.defaultof<'T>
 
+/// Marks a function as a SQL function, so SqlHydra renders it as SQL instead of evaluating
+/// it as an ordinary .NET call. Functions defined inside SqlHydra.Query are recognised
+/// automatically; user-defined `sqlFn` wrappers need this attribute to be usable in a `where`
+/// clause (they already work in `select` and `orderBy`).
+///
+/// Apply it to the function, or to the enclosing module or type to cover all of them:
+///   [<SqlHydra.Query.SqlHydraFunction>]
+///   let SOUNDEX (s: string) : string = sqlFn
+[<System.AttributeUsage(
+    System.AttributeTargets.Method ||| System.AttributeTargets.Class,
+    AllowMultiple = false,
+    Inherited = false)>]
+type SqlHydraFunctionAttribute() =
+    inherit System.Attribute()
+
 /// Assembly-level attribute that registers a SQL function name as an infix operator.
 /// Extension packages (e.g. SqlHydra.Query.Pgvector) apply this attribute on themselves and
 /// SqlHydra discovers it the first time a query is compiled. No explicit registration call required.

@@ -354,8 +354,13 @@ See the full list for each provider:
 
 You can easily define your own SQL function wrappers using the `sqlFn` helper:
 ```fsharp
-// Define a wrapper - the function name becomes the SQL function name
+// Define a wrapper - the function name becomes the SQL function name.
+// [<SqlHydraFunction>] marks it as SQL rather than a .NET call to evaluate, which is
+// what allows it in a `where`. It can also go on the enclosing module or type.
+[<SqlHydraFunction>]
 let SOUNDEX (s: string) : string = sqlFn
+
+[<SqlHydraFunction>]
 let DIFFERENCE (s1: string, s2: string) : int = sqlFn
 
 // Use in queries

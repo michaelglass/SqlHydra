@@ -12,8 +12,13 @@ let notImplMsg msg = raise (NotImplementedException msg)
 /// `rawExpr`, `sqlFn` wrappers, ...) rather than an ordinary .NET call.
 /// A SqlHydra function has a stub body (`Unchecked.defaultof<_>`), so evaluating one yields
 /// null/0 rather than anything meaningful: it must be rendered as SQL, never compiled and run.
+/// Functions declared elsewhere opt in with [<SqlHydraFunction>]; an unmarked external call
+/// such as `name.ToUpperInvariant()` must keep being evaluated to its value, as before.
 let isSqlHydraFunction (mi: MethodInfo) =
     mi.Module.Name = "SqlHydra.Query.dll"
+    || mi.IsDefined(typeof<SqlHydraFunctionAttribute>, false)
+    || (mi.DeclaringType <> null
+        && mi.DeclaringType.IsDefined(typeof<SqlHydraFunctionAttribute>, false))
 
 /// Aggregate method names recognized by the visitor. Used by visitSqlFn / pattern matchers.
 /// Keep in sync with QueryFunctions.Aggregates.

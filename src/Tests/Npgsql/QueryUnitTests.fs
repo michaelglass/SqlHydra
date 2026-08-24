@@ -22,6 +22,18 @@ open Npgsql.AdventureWorksNet10
 [<assembly: SqlHydra.Query.SqlHydraInfixOperator("cover_autodist", "<~>")>]
 do ()
 
+// Declared HERE, in the test assembly -- not inside SqlHydra.Query. This is what the
+// [<SqlHydraFunction>] opt-in exists for: without it these are indistinguishable from
+// ordinary .NET calls and get evaluated to their (stub) value instead of rendered as SQL.
+// SOUNDEX marks the function; ExtFn marks the enclosing type -- both levels are covered.
+[<SqlHydra.Query.SqlHydraFunction>]
+let SOUNDEX (s: string) : string = sqlFn
+
+[<SqlHydra.Query.SqlHydraFunction>]
+type ExtFn =
+    /// Case-folding over a NULLABLE column -- the overload SqlHydra itself does not ship.
+    static member lower(s: string option) : string = sqlFn
+
 [<Test>]
 let ``Simple Where``() =
     let sql =  
@@ -1281,3 +1293,37 @@ let ``SQL function compared to a column``() =
         }
         |> toSql
     sql.Contains("LOWER") =! true
+[<Test>]
+let ``user-defined SQL function is usable in a where``() =
+    let sql =
+        select {
+            for a in person.address do
+            where (ExtFn.lower a.addressline2 = "dallas")
+        }
+        |> toSql
+    sql.Contains("LOWER") =! true
+
+[<Test>]
+let ``the README custom-function example compiles to SQL``() =
+    // README, "Define custom functions": where (SOUNDEX(p.LastName) = SOUNDEX("Smith")).
+    // This threw "Unable to evaluate query parameter expression" before the opt-in existed.
+    let sql =
+        select {
+            for a in person.address do
+            where (SOUNDEX(a.city) = SOUNDEX("Smith"))
+        }
+        |> toSql
+    sql.Contains("SOUNDEX") =! true
+
+[<Test>]
+let ``an unmarked .NET call in a where is still evaluated``() =
+    // The opt-in must not capture ordinary calls: this stays a bound parameter.
+    let name = "dallas"
+    let sql =
+        select {
+            for a in person.address do
+            where (a.city = name.ToUpperInvariant())
+        }
+        |> toSql
+    sql.Contains("@p") =! true
+    sql.Contains("UPPER") =! false
