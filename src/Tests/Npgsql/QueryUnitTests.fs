@@ -22,6 +22,14 @@ open Npgsql.AdventureWorksNet10
 [<assembly: SqlHydra.Query.SqlHydraInfixOperator("cover_autodist", "<~>")>]
 do ()
 
+// Declared HERE, in the test assembly -- not inside SqlHydra.Query. Plain `sqlFn`
+// wrappers, with nothing applied to them: being a wrapper is what makes them SQL.
+let SOUNDEX (s: string) : string = sqlFn
+
+type ExtFn =
+    /// Case folding over a NULLABLE column -- the overload SqlHydra itself does not ship.
+    static member lower(s: string option) : string = sqlFn
+
 [<Test>]
 let ``Simple Where``() =
     let sql =  
@@ -1341,3 +1349,44 @@ let ``a captured .NET value on the left is still bound as a parameter``() =
         |> toSql
     test <@ sql.Contains("(\"a\".\"city\" = @p0)") @>
     test <@ not (sql.Contains("UPPER")) @>
+[<Test>]
+let ``a user-defined SQL function can be used in a where``() =
+    // The bug: a `sqlFn` wrapper declared outside SqlHydra.Query threw
+    // NotImplementedException "Unable to evaluate query parameter expression", because
+    // `where` tried to compute it as a .NET value. It worked in `select` all along.
+    let sql =
+        select {
+            for a in person.address do
+            where (ExtFn.lower a.addressline2 = "dallas")
+        }
+        |> toSql
+    test <@ sql.Contains("(LOWER(a.addressline2) = @p0)") @>
+
+[<Test>]
+let ``the README's custom-function example runs``() =
+    // The example the README tells people to write, verbatim:
+    //   where (SOUNDEX(p.LastName) = SOUNDEX("Smith"))
+    // It threw "Unable to evaluate query parameter expression", so the documented feature
+    // did not work in the clause the documentation demonstrates it in.
+    let sql =
+        select {
+            for a in person.address do
+            where (SOUNDEX(a.city) = SOUNDEX("Smith"))
+        }
+        |> toSql
+    test <@ sql.Contains("(SOUNDEX(a.city) = SOUNDEX('Smith'))") @>
+
+[<Test>]
+let ``a user-defined SQL function over constants does not silently become a NULL check``() =
+    // The dangerous shape, and the reason this is detection rather than an opt-in marker.
+    // With no column argument there is nothing to make evaluation fail, so the wrapper
+    // evaluated to the stub's null and the predicate became `city IS NULL`: the query ran
+    // and returned the wrong rows, with nothing to notice.
+    let sql =
+        select {
+            for a in person.address do
+            where (a.city = SOUNDEX "Smith")
+        }
+        |> toSql
+    test <@ sql.Contains("(a.city = SOUNDEX('Smith'))") @>
+    test <@ not (sql.Contains("IS NULL")) @>

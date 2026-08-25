@@ -8,12 +8,52 @@ open FastExpressionCompiler
 let notImpl() = raise (NotImplementedException())
 let notImplMsg msg = raise (NotImplementedException msg)
 
+/// The IL scan below costs far more than a string compare, and the answer never changes
+/// for a given method, so remember it.
+let private sqlFnWrapperCache = System.Collections.Concurrent.ConcurrentDictionary<MethodInfo, bool>()
+
+/// True when a method IS a `sqlFn` wrapper: its body does nothing but return the `sqlFn`
+/// stub. That is the definition of a SQL function wrapper, so it is what we detect —
+/// no attribute to apply and none to forget.
+///
+/// Byte-scanning for `call` (0x28) can in principle hit an operand byte rather than an
+/// opcode, so the token is resolved and matched against `SqlFunctions.sqlFn` before it
+/// counts. Anything unreadable (abstract, native, dynamic) is simply not a wrapper.
+let private isSqlFnWrapper (mi: MethodInfo) =
+    sqlFnWrapperCache.GetOrAdd(mi, fun mi ->
+        try
+            match mi.GetMethodBody() with
+            | null -> false
+            | body ->
+                match body.GetILAsByteArray() with
+                | null -> false
+                | il ->
+                    let mutable found = false
+                    let mutable i = 0
+                    while not found && i <= il.Length - 5 do
+                        if il.[i] = 0x28uy then
+                            try
+                                let target = mi.Module.ResolveMethod(BitConverter.ToInt32(il, i + 1))
+                                if target.Name = "sqlFn"
+                                   && target.DeclaringType <> null
+                                   && target.DeclaringType.FullName = "SqlHydra.Query.SqlFunctions"
+                                then found <- true
+                            with _ -> ()
+                        i <- i + 1
+                    found
+        with _ -> false)
+
 /// True when a method call is a SqlHydra query function (`isIn`, `like`, `inlineValue`,
 /// `rawExpr`, `sqlFn` wrappers, ...) rather than an ordinary .NET call.
-/// A SqlHydra function has a stub body (`Unchecked.defaultof<_>`), so evaluating one yields
-/// null/0 rather than anything meaningful: it must be rendered as SQL, never compiled and run.
+/// A SqlHydra function has a stub body, so evaluating one yields null/0 rather than
+/// anything meaningful: it must be rendered as SQL, never compiled and run.
+///
+/// Functions declared inside SqlHydra.Query qualify on the cheap module check — not all of
+/// them are `sqlFn` wrappers (`isIn` returns a real `true`). Functions declared anywhere
+/// else qualify by being `sqlFn` wrappers, which is what lets a user-defined function be
+/// used in a `where`.
 let isSqlHydraFunction (mi: MethodInfo) =
-    mi.Module.Name = "SqlHydra.Query.dll"
+    mi.Module.Name = "SqlHydra.Query.dll" || isSqlFnWrapper mi
 
 /// Aggregate method names recognized by the visitor. Used by visitSqlFn / pattern matchers.
 /// Keep in sync with QueryFunctions.Aggregates.
