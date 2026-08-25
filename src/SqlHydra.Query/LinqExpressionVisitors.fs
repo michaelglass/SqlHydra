@@ -540,12 +540,18 @@ let private formatNumericLiteral (value: obj) (clrType: System.Type) =
     | t when t.IsPrimitive && t <> typeof<char> && t <> typeof<bool> -> sprintf "%O" value
     | t -> failwithf "Cannot format SQL literal of type %s — wrap with inlineValue or parameterize." t.FullName
 
+/// Renders a string as a SQL literal, doubling embedded single quotes so the value
+/// cannot close the literal early.
+let private renderStringLiteral (s: string) =
+    let escaped = s.Replace("'", "''")
+    $"'{escaped}'"
+
 /// Renders a `ConstantExpression` to a SQL literal. When `handleBool` is true, bool constants
 /// emit `TRUE`/`FALSE`; otherwise they fall through to numeric formatting (matching the
 /// orderBy walker, which never receives bool constants). Shared by the expression walkers.
 let private renderConstant (handleBool: bool) (c: ConstantExpression) =
     if c.Value = null then "NULL"
-    elif c.Type = typeof<string> then $"'{c.Value}'"
+    elif c.Type = typeof<string> then renderStringLiteral (c.Value :?> string)
     elif handleBool && c.Type = typeof<bool> then (if c.Value :?> bool then "TRUE" else "FALSE")
     else formatNumericLiteral c.Value c.Type
 
@@ -554,7 +560,7 @@ let private renderConstant (handleBool: bool) (c: ConstantExpression) =
 let private renderObjAsLiteral (v: obj) =
     match v with
     | null -> "NULL"
-    | :? string as s -> $"'{s}'"
+    | :? string as s -> renderStringLiteral s
     | :? bool as b -> if b then "TRUE" else "FALSE"
     | :? System.Guid as g -> $"'{g}'"
     | :? System.DateTime as dt ->
@@ -619,12 +625,7 @@ let rec visitSqlFn (qualifyColumn: string -> MemberInfo -> string) (exp: Express
                         let cond = t.GetProperty("Item1").GetValue(item) :?> bool
                         let v = t.GetProperty("Item2").GetValue(item)
                         let condStr = if cond then "TRUE" else "FALSE"
-                        let valStr =
-                            match v with
-                            | null -> "NULL"
-                            | :? string as s -> $"'{s}'"
-                            | x -> sprintf "%O" x
-                        yield (condStr, valStr) ]
+                        yield (condStr, renderObjAsLiteral v) ]
                 | _ -> notImplMsg $"Cannot extract caseWhenMulti list: {exp.NodeType}"
             with ex -> notImplMsg $"Cannot extract caseWhenMulti list: {exp.NodeType} ({ex.Message})"
     and extractTuple (exp: Expression) : string * string =
