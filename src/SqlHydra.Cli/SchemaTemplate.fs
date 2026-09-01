@@ -95,6 +95,10 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
                     | _ ->
                         None
 
+                // Before the attributes, so the doc comment binds to the field.
+                for line in col.Doc do
+                    $"/// {line}"
+
                 // Emitted whatever `provider_db_type_attributes` says: a column the database
                 // owns is read-only regardless of how parameters bind, and the generated file
                 // already depends on SqlHydra.Query for its version check.

@@ -1,4 +1,4 @@
-module UnitTests.ContributeColumns
+﻿module UnitTests.ContributeColumns
 
 open System
 open NUnit.Framework
@@ -26,6 +26,7 @@ let private discovered name =
         Column.IsNullable = false
         Column.IsPK = name = "id"
         Column.IsReadOnly = false
+        Column.Doc = []
     }
 
 let private mkTable schema name tableType columns =
@@ -57,6 +58,9 @@ let private xminColumn =
         Column.IsNullable = false
         Column.IsPK = false
         Column.IsReadOnly = true
+        Column.Doc =
+            [ "The id of the transaction that inserted this row version — PostgreSQL's row version."
+              "It changes on every write to the row." ]
     }
 
 /// Contributes `xmin` to PostgreSQL base tables only — a view has no system columns.
@@ -189,6 +193,14 @@ let ``Generated field carries ReadOnlyColumn when the extension marks it`` () =
     let code = apply [ XminContribution() ] |> generate []
 
     test <@ code.Contains "[<ReadOnlyColumn>]" @>
+
+[<Test>]
+let ``A contributed column carries the doc comment the extension gave it`` () =
+    let code = apply [ XminContribution() ] |> generate []
+
+    // The caution belongs on the field, not only in the extension's README: whoever reaches
+    // for the column is reading the generated type, not the extension's docs.
+    test <@ code.Contains "/// It changes on every write to the row." @>
 
 [<Test>]
 let ``Discovered columns are not marked read-only`` () =

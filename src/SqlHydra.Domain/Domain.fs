@@ -57,6 +57,13 @@ type Column =
         /// Nothing here is provider-specific: a PostgreSQL system column, a SQL Server
         /// `rowversion` and a generated/computed column are the same shape.
         IsReadOnly: bool
+
+        /// Doc-comment lines emitted above the generated field, one `///` line each.
+        ///
+        /// A caution that lives only in an extension's README reaches whoever configured
+        /// the extension and nobody else. This puts it on the field, where the person
+        /// reaching for the column is looking.
+        Doc: string list
     }
 
 type TableType = 

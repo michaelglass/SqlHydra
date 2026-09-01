@@ -1001,6 +1001,9 @@ type XminColumn() =
                             Column.IsNullable = false
                             Column.IsPK = false
                             Column.IsReadOnly = true
+                            Column.Doc =
+                                [ "PostgreSQL's row version: the id of the transaction that"
+                                  "inserted this row version." ]
                         }
                     ]
                 else
@@ -1022,6 +1025,12 @@ holds ever reaching the statement. Reads are untouched.
 
 Nothing about it is PostgreSQL-specific: a system column, a SQL Server `rowversion` and a
 generated column are the same shape.
+
+#### Documenting a Contributed Column
+
+`Column.Doc` is emitted as `///` lines above the generated field. A caution that lives only in an
+extension's README reaches whoever configured the extension and nobody else; on the field it
+reaches whoever reaches for the column.
 
 </details>
 
