@@ -10,3 +10,6 @@ open System
                  ||| AttributeTargets.Field)>]
 type SystemColumnAttribute() =
     inherit ReadOnlyColumnAttribute()
+
+    override _.Refusal =
+        "it is a system column, and PostgreSQL refuses to assign to one at all — `DEFAULT` included. Remove the `set`"

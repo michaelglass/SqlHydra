@@ -366,3 +366,179 @@ let ``A table that does not opt in gets no system column, alongside one that doe
         hasXmin "sqlhydra_no_optin" =! false
     finally
         execute "DROP TABLE IF EXISTS sales.sqlhydra_optin; DROP TABLE IF EXISTS sales.sqlhydra_no_optin;"
+
+// What follows from a column being read-only, per kind. Every pair of kinds agrees on one
+// of these and differs on the other, so no single property tells the three apart and the
+// kind itself is what has to travel. Each row is measured against PostgreSQL 18 in
+// `A read-only column of each kind behaves as its kind says` below.
+
+[<TestCase(false, true, TestName = "Generated: SELECT * returns it, DEFAULT is legal")>]
+let ``A generated column comes back from SELECT star and takes DEFAULT`` excludedFromSelectStar acceptsDefault =
+    ReadOnlyColumn.Generated.ExcludedFromSelectStar =! excludedFromSelectStar
+    ReadOnlyColumn.Generated.AcceptsDefault =! acceptsDefault
+
+[<TestCase(true, false, TestName = "SystemColumn: SELECT * skips it, DEFAULT is refused")>]
+let ``A system column is absent from SELECT star and takes no value at all`` excludedFromSelectStar acceptsDefault =
+    ReadOnlyColumn.SystemColumn.ExcludedFromSelectStar =! excludedFromSelectStar
+    ReadOnlyColumn.SystemColumn.AcceptsDefault =! acceptsDefault
+
+[<TestCase(false, false, TestName = "UnwritableViewColumn: SELECT * returns it, DEFAULT is refused")>]
+let ``A view column comes back from SELECT star but still takes no value`` excludedFromSelectStar acceptsDefault =
+    ReadOnlyColumn.UnwritableViewColumn.ExcludedFromSelectStar =! excludedFromSelectStar
+    ReadOnlyColumn.UnwritableViewColumn.AcceptsDefault =! acceptsDefault
+
+[<Test>]
+let ``No two kinds agree on everything, so none can stand in for another``() =
+    // A record of properties makes two kinds with the same property values the same value.
+    // This is the assertion that would have to be deleted to go back to one.
+    let kinds = [ ReadOnlyColumn.Generated; ReadOnlyColumn.SystemColumn; ReadOnlyColumn.UnwritableViewColumn ]
+    let signatures = kinds |> List.map (fun kind -> kind.ExcludedFromSelectStar, kind.AcceptsDefault)
+    (signatures |> List.distinct |> List.length) =! kinds.Length
+
+// A column of a view that cannot carry a write: the third kind, detected against a live
+// PostgreSQL.
+
+let private viewProbeDdl =
+    """
+    DROP VIEW IF EXISTS sales.sqlhydra_trigger_view_probe CASCADE;
+    DROP VIEW IF EXISTS sales.sqlhydra_aggregate_view_probe CASCADE;
+    DROP VIEW IF EXISTS sales.sqlhydra_expression_view_probe CASCADE;
+    DROP TABLE IF EXISTS sales.sqlhydra_view_base_probe CASCADE;
+    DROP FUNCTION IF EXISTS sales.sqlhydra_view_probe_fn() CASCADE;
+
+    CREATE TABLE sales.sqlhydra_view_base_probe (price numeric NOT NULL);
+
+    -- auto-updatable but for the one column that is an expression
+    CREATE VIEW sales.sqlhydra_expression_view_probe AS
+        SELECT price, price * 2 AS doubled FROM sales.sqlhydra_view_base_probe;
+
+    -- not auto-updatable in any column
+    CREATE VIEW sales.sqlhydra_aggregate_view_probe AS
+        SELECT count(*) AS row_count, sum(price) AS total FROM sales.sqlhydra_view_base_probe;
+
+    -- the same shape, made writable again by INSTEAD OF triggers
+    CREATE VIEW sales.sqlhydra_trigger_view_probe AS
+        SELECT count(*) AS row_count, sum(price) AS total FROM sales.sqlhydra_view_base_probe;
+    CREATE FUNCTION sales.sqlhydra_view_probe_fn() RETURNS trigger LANGUAGE plpgsql AS
+        $$ BEGIN RETURN NEW; END; $$;
+    CREATE TRIGGER sqlhydra_view_probe_insert INSTEAD OF INSERT ON sales.sqlhydra_trigger_view_probe
+        FOR EACH ROW EXECUTE FUNCTION sales.sqlhydra_view_probe_fn();
+    CREATE TRIGGER sqlhydra_view_probe_update INSTEAD OF UPDATE ON sales.sqlhydra_trigger_view_probe
+        FOR EACH ROW EXECUTE FUNCTION sales.sqlhydra_view_probe_fn();
+    """
+
+let private dropViewProbes =
+    "DROP VIEW IF EXISTS sales.sqlhydra_trigger_view_probe CASCADE;
+     DROP VIEW IF EXISTS sales.sqlhydra_aggregate_view_probe CASCADE;
+     DROP VIEW IF EXISTS sales.sqlhydra_expression_view_probe CASCADE;
+     DROP TABLE IF EXISTS sales.sqlhydra_view_base_probe CASCADE;
+     DROP FUNCTION IF EXISTS sales.sqlhydra_view_probe_fn() CASCADE;"
+
+[<TestCase(false, false, true, Description = "an expression or aggregate column of a plain view")>]
+[<TestCase(true, false, false, Description = "a column an auto-updatable view passes straight through")>]
+[<TestCase(false, true, false, Description = "an INSTEAD OF trigger takes the whole row, column answer or not")>]
+[<TestCase(true, true, false, Description = "writable twice over")>]
+let ``A view column is read-only only when nothing can carry a write to it`` columnIsUpdatable insteadOfTriggerWrites expected =
+    let updatability : NpgsqlSchemaProvider.PgUpdatability =
+        { ColumnIsUpdatable = columnIsUpdatable; InsteadOfTriggerWrites = insteadOfTriggerWrites }
+    NpgsqlSchemaProvider.isViewColumnUnwritable updatability =! expected
+
+/// The read-only kind, by view name and column name. A swapped argument makes `List.find`
+/// throw, so a mixed-up probe fails loudly rather than asserting against the wrong view.
+let private readOnlyKindIn () =
+    let cfg =
+        { baseCfg with
+            ConnectionString = DB.connectionString
+            Filters =
+                { Filters.Empty with
+                    Includes =
+                        [ "sales/sqlhydra_expression_view_probe"
+                          "sales/sqlhydra_aggregate_view_probe"
+                          "sales/sqlhydra_trigger_view_probe" ] } }
+
+    let tables = (NpgsqlSchemaProvider.getSchema(cfg, false, [])).Tables
+
+    fun view column ->
+        tables
+        |> List.find (fun tbl -> tbl.Name = view)
+        |> fun tbl -> (tbl.Columns |> List.find (fun col -> col.Name = column)).ReadOnly
+
+[<Test>]
+let ``A view column no write can reach is read-only as its own kind``() =
+    // Not `Generated`: nothing generates it, and `DEFAULT` will not write it either.
+    execute viewProbeDdl
+
+    try
+        let readOnlyKind = readOnlyKindIn ()
+        readOnlyKind "sqlhydra_expression_view_probe" "doubled" =! Some ReadOnlyColumn.UnwritableViewColumn
+        readOnlyKind "sqlhydra_expression_view_probe" "price" =! None
+    finally
+        execute dropViewProbes
+
+[<Test>]
+let ``An INSTEAD OF trigger keeps every column of its view writable``() =
+    // The trigger is handed the whole row, so it is the one thing that makes a view of this
+    // shape writable. Marking these read-only drops both columns from the INSERT the trigger
+    // exists to receive.
+    execute viewProbeDdl
+
+    try
+        let readOnlyKind = readOnlyKindIn ()
+        readOnlyKind "sqlhydra_trigger_view_probe" "row_count" =! None
+        readOnlyKind "sqlhydra_trigger_view_probe" "total" =! None
+        // The same shape without the triggers: nothing can carry the write.
+        readOnlyKind "sqlhydra_aggregate_view_probe" "row_count" =! Some ReadOnlyColumn.UnwritableViewColumn
+        readOnlyKind "sqlhydra_aggregate_view_probe" "total" =! Some ReadOnlyColumn.UnwritableViewColumn
+    finally
+        execute dropViewProbes
+
+// The kinds' claims, measured rather than asserted from memory.
+
+let private kindProbeDdl =
+    """
+    DROP VIEW IF EXISTS sales.sqlhydra_kind_view CASCADE;
+    DROP TABLE IF EXISTS sales.sqlhydra_kind_base CASCADE;
+    CREATE TABLE sales.sqlhydra_kind_base (
+        price numeric NOT NULL,
+        tax   numeric GENERATED ALWAYS AS (price * 0.1) STORED
+    );
+    INSERT INTO sales.sqlhydra_kind_base (price) VALUES (10);
+    CREATE VIEW sales.sqlhydra_kind_view AS
+        SELECT price, price * 2 AS doubled FROM sales.sqlhydra_kind_base;
+    """
+
+/// True when `SELECT *` on the relation brings the column back.
+let private selectStarReturns (relation: string) (column: string) =
+    use conn = new global.Npgsql.NpgsqlConnection(DB.connectionString)
+    conn.Open()
+    use cmd = new global.Npgsql.NpgsqlCommand($"SELECT * FROM {relation} LIMIT 0", conn)
+    use rdr = cmd.ExecuteReader()
+    [ for i in 0 .. rdr.FieldCount - 1 -> rdr.GetName i ] |> List.contains column
+
+/// True when PostgreSQL accepts `SET column = DEFAULT` — what `setRaw` puts on the wire.
+let private acceptsDefault (relation: string) (column: string) =
+    try
+        execute $"UPDATE {relation} SET {column} = DEFAULT;"
+        true
+    with :? global.Npgsql.PostgresException -> false
+
+[<Test>]
+let ``A read-only column of each kind behaves as its kind says``() =
+    // If PostgreSQL and the kind ever disagree, the kind is what is wrong.
+    execute kindProbeDdl
+
+    try
+        let generated = ReadOnlyColumn.Generated
+        selectStarReturns "sales.sqlhydra_kind_base" "tax" =! not generated.ExcludedFromSelectStar
+        acceptsDefault "sales.sqlhydra_kind_base" "tax" =! generated.AcceptsDefault
+
+        let systemColumn = ReadOnlyColumn.SystemColumn
+        selectStarReturns "sales.sqlhydra_kind_base" "xmin" =! not systemColumn.ExcludedFromSelectStar
+        acceptsDefault "sales.sqlhydra_kind_base" "xmin" =! systemColumn.AcceptsDefault
+
+        let viewColumn = ReadOnlyColumn.UnwritableViewColumn
+        selectStarReturns "sales.sqlhydra_kind_view" "doubled" =! not viewColumn.ExcludedFromSelectStar
+        acceptsDefault "sales.sqlhydra_kind_view" "doubled" =! viewColumn.AcceptsDefault
+    finally
+        execute "DROP VIEW IF EXISTS sales.sqlhydra_kind_view CASCADE;
+                 DROP TABLE IF EXISTS sales.sqlhydra_kind_base CASCADE;"

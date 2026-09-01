@@ -2036,3 +2036,76 @@ let ``system column: excludeColumn on one is a no-op, on insert and on update``(
         }
         |> toUpdateSql
     updateWith =! updateWithout
+
+// One record carrying all three read-only kinds, so the `set` refusal can be read off each
+// without the fixtures differing in anything else.
+
+module ReadOnlyKindFixture =
+    module sales =
+        [<CLIMutable>]
+        type row =
+            { price: decimal
+              [<SqlHydra.ReadOnlyColumn>]
+              tax: decimal
+              [<SqlHydra.SystemColumn>]
+              xmin: uint
+              [<SqlHydra.UnwritableViewColumn>]
+              doubled: decimal }
+
+    let rows = table<sales.row>
+
+[<Test>]
+let ``read-only kinds: the set refusal says why this column, not why some column``() =
+    let refusal (build: unit -> unit) =
+        (Assert.Throws<Exception>(fun () -> build ())).Message
+
+    let generated =
+        refusal (fun () ->
+            update {
+                for r in ReadOnlyKindFixture.rows do
+                set r.tax 1m
+                where (r.price = 1m)
+            }
+            |> toUpdateSql
+            |> ignore)
+
+    let systemColumn =
+        refusal (fun () ->
+            update {
+                for r in ReadOnlyKindFixture.rows do
+                set r.xmin 1u
+                where (r.price = 1m)
+            }
+            |> toUpdateSql
+            |> ignore)
+
+    let viewColumn =
+        refusal (fun () ->
+            update {
+                for r in ReadOnlyKindFixture.rows do
+                set r.doubled 1m
+                where (r.price = 1m)
+            }
+            |> toUpdateSql
+            |> ignore)
+
+    // Only the generated column may be written at all, and only as DEFAULT.
+    test <@ generated.Contains("'tax'") && generated.Contains("setRaw") @>
+    test <@ systemColumn.Contains("'xmin'") && systemColumn.Contains("system column") @>
+    test <@ viewColumn.Contains("'doubled'") && viewColumn.Contains("underneath the view") @>
+
+    // The three sentences are what a single bool cannot produce.
+    [ generated; systemColumn; viewColumn ] |> List.distinct |> List.length =! 3
+
+[<Test>]
+let ``read-only kinds: only the system column is appended to a whole-entity select``() =
+    // Every kind derives from ReadOnlyColumn, and only one derives from SystemColumn. Were
+    // the view kind to derive from SystemColumn too, `"r".*, "r"."doubled"` would name a
+    // column the star already returned.
+    let sql =
+        select {
+            for r in ReadOnlyKindFixture.rows do
+            select r
+        }
+        |> toSql
+    sql =! "SELECT \"r\".*, \"r\".\"xmin\" FROM \"sales\".\"row\" AS \"r\""

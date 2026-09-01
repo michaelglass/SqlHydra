@@ -19,6 +19,26 @@ let isBaseTableType tableType =
 let isDatabaseGenerated (attgenerated: string) (attidentity: string) =
     attgenerated <> "" || attidentity = "a"
 
+/// How a view answers `pg_column_is_updatable` and `pg_relation_is_updatable`.
+/// https://www.postgresql.org/docs/current/functions-info.html
+type PgUpdatability =
+    { /// `pg_column_is_updatable(relid, attnum, include_triggers := false)`.
+      ColumnIsUpdatable: bool
+
+      /// True when an `INSTEAD OF` trigger, rather than the view's own shape, is what
+      /// lets writes reach it: the relation's event mask changes once triggers count.
+      InsteadOfTriggerWrites: bool }
+
+/// True for a view column PostgreSQL refuses to let a statement name.
+///
+/// An `INSTEAD OF` trigger is handed the whole row, so it makes every column of its view
+/// writable again, and `pg_column_is_updatable` will not say so even when asked to include
+/// triggers: it demands the view be deletable too, which a trigger covering only INSERT and
+/// UPDATE is not. Reading the column answer alone marks a writable column read-only, and the
+/// column then vanishes from every INSERT.
+let isViewColumnUnwritable (updatability: PgUpdatability) =
+    not updatability.InsteadOfTriggerWrites && not updatability.ColumnIsUpdatable
+
 /// A `system_columns` entry names one column of one table: `{schema}/{table}.{column}`,
 /// the table part a glob — the grammar a column filter in `[filters]` already uses.
 let parseSystemColumn (entry: string) : string * Column =
@@ -122,10 +142,50 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
         ]
         |> Set.ofList
 
-    /// `Some` when the database owns the value, so it is never INSERTed or SET.
+    let unwritableViewColumns =
+        let sql =
+            """
+            SELECT
+                pg_namespace.nspname AS table_schema,
+                pg_class.relname AS table_name,
+                pg_attribute.attname AS column_name,
+                pg_catalog.pg_column_is_updatable(pg_class.oid, pg_attribute.attnum, false)
+                    AS column_is_updatable,
+                pg_catalog.pg_relation_is_updatable(pg_class.oid, true)
+                    <> pg_catalog.pg_relation_is_updatable(pg_class.oid, false)
+                    AS instead_of_trigger_writes
+            FROM pg_attribute
+            INNER JOIN pg_class ON pg_class.oid = pg_attribute.attrelid
+            INNER JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+            WHERE
+                -- views (v) only: a table's columns are covered by the generation flags,
+                -- and a materialized view takes no write at all, read-only or not
+                pg_class.relkind = 'v' AND
+                pg_attribute.attnum >= 1 AND
+                NOT pg_attribute.attisdropped AND
+                pg_namespace.nspname not in ('pg_catalog', 'information_schema');
+            """
+
+        use cmd = new Npgsql.NpgsqlCommand(sql, conn)
+        use rdr = cmd.ExecuteReader()
+        [
+            while rdr.Read() do
+                let updatability =
+                    { ColumnIsUpdatable = rdr["column_is_updatable"] :?> bool
+                      InsteadOfTriggerWrites = rdr["instead_of_trigger_writes"] :?> bool }
+                if isViewColumnUnwritable updatability then
+                    rdr["table_schema"] :?> string,
+                    rdr["table_name"] :?> string,
+                    rdr["column_name"] :?> string
+        ]
+        |> Set.ofList
+
+    /// `Some` when the database owns the value, so it is never INSERTed or SET — and which
+    /// kind, because nothing else about being read-only follows from the fact alone.
     let readOnly (col: ColumnSchema) =
-        if generatedColumns.Contains(col.Schema, col.Table, col.Name)
-        then Some ReadOnlyColumn.Generated
+        let key = col.Schema, col.Table, col.Name
+        if generatedColumns.Contains key then Some ReadOnlyColumn.Generated
+        elif unwritableViewColumns.Contains key then Some ReadOnlyColumn.UnwritableViewColumn
         else None
 
     let enums =

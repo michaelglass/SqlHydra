@@ -99,11 +99,12 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
                 for line in col.Doc do
                     $"/// {line}"
 
+                // Every kind derives from ReadOnlyColumn, so a reader that only asks
+                // "is it read-only" keeps matching all three.
                 match col.ReadOnly with
-                | Some readOnly ->
-                    if readOnly.ExcludedFromSelectStar
-                    then "[<SystemColumn>]" // derives from ReadOnlyColumn
-                    else "[<ReadOnlyColumn>]"
+                | Some Generated -> "[<ReadOnlyColumn>]"
+                | Some SystemColumn -> "[<SystemColumn>]"
+                | Some UnwritableViewColumn -> "[<UnwritableViewColumn>]"
                 | None -> ()
 
                 if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value

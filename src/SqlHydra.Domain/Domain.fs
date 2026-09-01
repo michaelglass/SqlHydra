@@ -42,19 +42,32 @@ type TypeMapping =
     member this.IsValueType() = 
         isValueType this.ClrType
 
-/// A column the database writes and the caller cannot: a
-/// [generated or identity column](https://www.postgresql.org/docs/current/ddl-generated-columns.html),
-/// or a [system column](https://www.postgresql.org/docs/current/ddl-system-columns.html).
+/// Why the database writes a column and the caller cannot. The kinds agree on the one rule
+/// SqlHydra applies — never name the column in an INSERT or an UPDATE `SET` — and agree on
+/// nothing else, so what follows from being read-only is asked of the kind, not stored
+/// alongside it.
 type ReadOnlyColumn =
-    {
-        /// True only for a system column, which `SELECT *` does not return, so a
-        /// whole-entity select has to name it. A generated column comes back normally.
-        ExcludedFromSelectStar: bool
-    }
-    /// A generated or `GENERATED ALWAYS AS IDENTITY` column.
-    static member Generated = { ExcludedFromSelectStar = false }
-    /// A system column.
-    static member SystemColumn = { ExcludedFromSelectStar = true }
+    /// [`GENERATED ALWAYS AS (...)` or `GENERATED ALWAYS AS IDENTITY`](https://www.postgresql.org/docs/current/ddl-generated-columns.html).
+    | Generated
+    /// A [system column](https://www.postgresql.org/docs/current/ddl-system-columns.html).
+    | SystemColumn
+    /// A column of a view that maps onto no column of a base relation — an expression, or
+    /// any column of a view PostgreSQL cannot auto-update.
+    | UnwritableViewColumn
+
+    /// True only for a system column, which `SELECT *` does not return, so a whole-entity
+    /// select has to name it. The other kinds come back normally.
+    member this.ExcludedFromSelectStar =
+        match this with
+        | SystemColumn -> true
+        | Generated | UnwritableViewColumn -> false
+
+    /// True when `DEFAULT` is a value a write may give the column. Only a generated column
+    /// takes it; PostgreSQL refuses `SET xmin = DEFAULT` and `SET doubled = DEFAULT` alike.
+    member this.AcceptsDefault =
+        match this with
+        | Generated -> true
+        | SystemColumn | UnwritableViewColumn -> false
 
 type Column = 
     {

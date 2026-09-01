@@ -252,6 +252,17 @@ module internal QueryUtils =
     let internal getSystemColumnNames (t: Type) =
         getMarkedFieldNames typeof<SqlHydra.SystemColumnAttribute> t
 
+    /// The sentence the column's own kind supplies. Read off the attribute instance rather
+    /// than the name set, so a kind added later carries its own without touching the raise.
+    /// Only the failure path reaches here, so the reflection is not worth caching.
+    let private refusalFor (t: Type) (column: string) =
+        match t.GetProperty(column) with
+        | null -> None
+        | property ->
+            match Attribute.GetCustomAttribute(property, typeof<SqlHydra.ReadOnlyColumnAttribute>, false) with
+            | :? SqlHydra.ReadOnlyColumnAttribute as att -> Some att.Refusal
+            | _ -> None
+
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
         let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
 
@@ -278,13 +289,14 @@ module internal QueryUtils =
 
         // `set` names a column the caller chose, and every column reaching this check is one
         // the database refuses to write, so there is no reading of it but a bug. Dropping it
-        // would report an update that silently did nothing. (`setRaw` is left alone: it can
-        // write the one value that is legal, DEFAULT.)
+        // would report an update that silently did nothing. (`setRaw` is left alone: for a
+        // generated column it can write DEFAULT, the one value that is legal there.)
         match spec.SetValues |> List.tryFind (fun (col, _) -> readOnlyColumns.Contains col) with
         | Some (col, _) ->
-            failwithf
-                "Cannot `set` read-only column '%s': the database owns its value and rejects a statement that names it. Remove the `set`."
-                col
+            let refusal =
+                refusalFor typeof<'T> col
+                |> Option.defaultValue "the database owns its value and rejects a statement that names it. Remove the `set`"
+            failwithf "Cannot `set` read-only column '%s': %s." col refusal
         | None -> ()
 
         // From `entity row`, which carries every field whether the caller meant to write it

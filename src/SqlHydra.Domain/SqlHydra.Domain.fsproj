@@ -15,6 +15,7 @@
         <Compile Include="ProviderDbTypeAttribute.fs" />
         <Compile Include="ReadOnlyColumnAttribute.fs" />
         <Compile Include="SystemColumnAttribute.fs" />
+        <Compile Include="UnwritableViewColumnAttribute.fs" />
     </ItemGroup>
 
     <ItemGroup>
