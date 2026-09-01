@@ -157,6 +157,7 @@ let private currencycode =
         Column.Name = "currencycode"
         Column.IsNullable = false
         Column.IsPK = true
+        Column.Doc = []
         Column.ReadOnly = None
         Column.TypeMapping =
             {
@@ -173,6 +174,7 @@ let private generatedRate =
         Column.Name = "rate"
         Column.IsNullable = false
         Column.IsPK = false
+        Column.Doc = []
         Column.ReadOnly = Some ReadOnlyColumn.Generated
         Column.TypeMapping =
             {

@@ -100,7 +100,7 @@ let tryFindTypeMapping isLegacy =
 /// [System columns](https://www.postgresql.org/docs/current/ddl-system-columns.html),
 /// named one at a time. The provider DB type is required: Npgsql won't bind `uint32`
 /// without it.
-let systemColumns: (string * TypeMapping * ReadOnlyColumn) list =
+let systemColumns: (string * TypeMapping * string list) list =
     let mapping alias clrType dbType providerDbType =
         {
             TypeMapping.ColumnTypeAlias = alias
@@ -115,42 +115,36 @@ let systemColumns: (string * TypeMapping * ReadOnlyColumn) list =
     [
         "tableoid",
         mapping "oid" "uint" DbType.UInt32 (nameof NpgsqlDbType.Oid),
-        { ExcludedFromSelectStar = true
-          Doc = [ "The OID of the table this row came from. Constant for a query against one table; it"
-                  "earns its keep when the query spans a partition or inheritance hierarchy." ] }
+        [ "The OID of the table this row came from. Constant for a query against one table; it"
+          "earns its keep when the query spans a partition or inheritance hierarchy." ]
 
         "xmin",
         xid,
-        { ExcludedFromSelectStar = true
-          Doc = [ "The id of the transaction that inserted this row version — PostgreSQL's row"
-                  "version. It changes on every write to the row, which is what makes it usable as"
-                  "an optimistic-concurrency check: read it, then include it in the WHERE of the"
-                  "UPDATE. If someone else wrote first the UPDATE matches no rows." ] }
+        [ "The id of the transaction that inserted this row version — PostgreSQL's row"
+          "version. It changes on every write to the row, which is what makes it usable as"
+          "an optimistic-concurrency check: read it, then include it in the WHERE of the"
+          "UPDATE. If someone else wrote first the UPDATE matches no rows." ]
 
         "cmin",
         cid,
-        { ExcludedFromSelectStar = true
-          Doc = [ "The command id within the inserting transaction. Only meaningful inside that"
-                  "transaction." ] }
+        [ "The command id within the inserting transaction. Only meaningful inside that"
+          "transaction." ]
 
         "xmax",
         xid,
-        { ExcludedFromSelectStar = true
-          Doc = [ "The id of the transaction that deleted this row version, or 0 for a live row." ] }
+        [ "The id of the transaction that deleted this row version, or 0 for a live row." ]
 
         "cmax",
         cid,
-        { ExcludedFromSelectStar = true
-          Doc = [ "The command id within the deleting transaction. Only meaningful inside that"
-                  "transaction." ] }
+        [ "The command id within the deleting transaction. Only meaningful inside that"
+          "transaction." ]
 
         "ctid",
         mapping "tid" "NpgsqlTypes.NpgsqlTid" DbType.Object (nameof NpgsqlDbType.Tid),
-        { ExcludedFromSelectStar = true
-          Doc = [ "WARNING: not a row identifier. `ctid` is the physical location of this row"
-                  "version, and it changes when the row is updated and when VACUUM FULL or CLUSTER"
-                  "moves it. It is valid only for as long as you hold the row you read it from."
-                  "Use the primary key for identity and `xmin` for versioning." ] }
+        [ "WARNING: not a row identifier. `ctid` is the physical location of this row"
+          "version, and it changes when the row is updated and when VACUUM FULL or CLUSTER"
+          "moves it. It is valid only for as long as you hold the row you read it from."
+          "Use the primary key for identity and `xmin` for versioning." ]
     ]
 
 /// The six system-column names, in the order the PostgreSQL manual lists them.
@@ -163,13 +157,14 @@ let toSystemColumn (name: string) : Column =
     let normalized = name.ToLower().Trim()
 
     match systemColumns |> List.tryFind (fun (n, _, _) -> n = normalized) with
-    | Some(n, typeMapping, readOnly) ->
+    | Some(n, typeMapping, doc) ->
         {
             Column.Name = n
             Column.IsNullable = false
             Column.IsPK = false
             Column.TypeMapping = typeMapping
-            Column.ReadOnly = Some readOnly
+            Column.Doc = doc
+            Column.ReadOnly = Some ReadOnlyColumn.SystemColumn
         }
     | None ->
         failwithf

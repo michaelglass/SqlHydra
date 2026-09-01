@@ -47,15 +47,14 @@ type TypeMapping =
 /// or a [system column](https://www.postgresql.org/docs/current/ddl-system-columns.html).
 type ReadOnlyColumn =
     {
-        /// Doc lines emitted above the generated field, so a caution reaches the use site.
-        Doc: string list
-
         /// True only for a system column, which `SELECT *` does not return, so a
         /// whole-entity select has to name it. A generated column comes back normally.
         ExcludedFromSelectStar: bool
     }
     /// A generated or `GENERATED ALWAYS AS IDENTITY` column.
-    static member Generated = { Doc = []; ExcludedFromSelectStar = false }
+    static member Generated = { ExcludedFromSelectStar = false }
+    /// A system column.
+    static member SystemColumn = { ExcludedFromSelectStar = true }
 
 type Column = 
     {
@@ -63,6 +62,8 @@ type Column =
         TypeMapping: TypeMapping
         IsNullable: bool
         IsPK: bool
+        /// Doc lines emitted above the generated field, so a caution reaches the use site.
+        Doc: string list
         /// `Some` when the database owns the value; `None` for an ordinary, writable column.
         ReadOnly: ReadOnlyColumn option
     }

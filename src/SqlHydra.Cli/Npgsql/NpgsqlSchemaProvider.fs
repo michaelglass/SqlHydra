@@ -306,6 +306,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
+                            Column.Doc = []
                             Column.ReadOnly = None
                         }
                     )
@@ -366,6 +367,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
+                            Column.Doc = []
                             Column.ReadOnly = readOnly col
                         }
                     )
@@ -399,6 +401,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                                 TypeMapping.ProviderDbType = None
                             }
                         Column.IsPK = col.IsPrimaryKey
+                        Column.Doc = []
                         Column.ReadOnly = readOnly col
                     }
                 )
