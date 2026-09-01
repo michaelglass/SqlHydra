@@ -128,7 +128,17 @@ let loadNamed (project: FileInfo) (extensionNames: string list) : ISqlHydraExten
         let dllName = $"{extName}.dll"
         match findDll project dllName with
         | None ->
-            failwith $"Could not find '{dllName}' in the build output of '{project.Name}'. Ensure the project has been built."
+            // A LIBRARY project does not copy its package assemblies to bin/ -- they are
+            // resolved from the NuGet cache at run time instead -- so an extension arriving as
+            // a PackageReference is simply not there to find, however correctly it is
+            // configured. Worth naming: the symptom is identical to a typo, and the fix is a
+            // property most people have never set.
+            failwith (
+                $"Could not find '{dllName}' in the build output of '{project.Name}'. Ensure the project has been built. "
+                + "If the extension is a PackageReference and this is a library project, add "
+                + "<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies> to it: a library does not copy "
+                + "package assemblies to its output directory, so there is nothing here to load."
+            )
         | Some path ->
             // A registered extension that yields no ISqlHydraExtension is always a mistake worth
             // stopping for: otherwise generation silently proceeds without the mapping and exits 0,

@@ -1,4 +1,4 @@
-module UnitTests.Extensions
+﻿module UnitTests.Extensions
 
 open System
 open System.IO
@@ -35,4 +35,8 @@ let ``loadNamed raises when a registered extension yields no implementations`` (
 let ``loadNamed raises when the named dll is missing from build output`` () =
     withTempProject "Missing" false (fun proj ->
         let ex = Assert.Throws<Exception>(fun () -> Extensions.loadNamed proj [ "Missing" ] |> ignore)
-        test <@ ex.Message.Contains("Missing") @>)
+        test <@ ex.Message.Contains("Missing") @>
+        // A library project does not copy its package assemblies to bin/, so an extension
+        // arriving as a PackageReference is not there to find -- a symptom identical to a typo,
+        // with a fix most people have never heard of.
+        test <@ ex.Message.Contains("CopyLocalLockFileAssemblies") @>)
