@@ -8,3 +8,9 @@ open System
                  ||| AttributeTargets.Field)>]
 type ReadOnlyColumnAttribute() =
     inherit Attribute()
+
+/// SPIKE (design B): the nominal wrapper codegen would emit for a read-only column.
+/// Lives in SqlHydra.Domain so both the generator and SqlHydra.Query.Hydration can see it.
+type ReadOnly<'T> =
+    { Value: 'T }
+    override this.ToString() = sprintf "%A" this.Value

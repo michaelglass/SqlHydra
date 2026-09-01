@@ -1,0 +1,37 @@
+############ probes/A01_set_plain.fs
+  probes/A01_set_plain.fs(7,19): error FS0001: This expression was expected to have type    'decimal<ro>'    but here has type    'decimal'
+############ probes/A02_where_plain.fs
+  probes/A02_where_plain.fs(7,24): error FS0001: This expression was expected to have type    'decimal<ro>'    but here has type    'decimal'
+############ probes/A03_record_literal.fs
+  probes/A03_record_literal.fs(4,12): error FS0001: This expression was expected to have type    'int<ro>'    but here has type    'int'
+  probes/A03_record_literal.fs(4,5): error FS0764: No assignment given for field 'disc' of type 'Spike.SchemaA.sales.spike_readonly'
+  probes/A03_record_literal.fs(8,13): error FS0001: This expression was expected to have type    'decimal<ro>'    but here has type    'decimal'
+############ probes/A04_add.fs
+  probes/A04_add.fs(3,61): error FS0001: Type constraint mismatch. The type     'decimal<ro>'    is not compatible with type    'decimal'
+############ probes/A05_printf_M.fs
+  COMPILES
+############ probes/A06_pass_to_fn.fs
+  probes/A06_pass_to_fn.fs(4,61): error FS0001: This expression was expected to have type    'decimal'    but here has type    'decimal<ro>'
+############ probes/A07_compare.fs
+  probes/A07_compare.fs(3,61): error FS0001: This expression was expected to have type    'decimal<ro>'    but here has type    'decimal'
+############ probes/A08_set_measure_literal.fs
+  COMPILES
+############ probes/A09_set_text_col.fs
+  COMPILES
+############ probes/A10_measure_on_nonnumeric.fs
+  probes/A10_measure_on_nonnumeric.fs(17,8): error FS0033: The non-generic type 'Microsoft.FSharp.Core.string' does not expect any type arguments, but here is given 1 type argument(s)
+  probes/A10_measure_on_nonnumeric.fs(18,8): error FS0033: The non-generic type 'Microsoft.FSharp.Core.bool' does not expect any type arguments, but here is given 1 type argument(s)
+  probes/A10_measure_on_nonnumeric.fs(19,8): error FS0033: The non-generic type 'System.DateTime' does not expect any type arguments, but here is given 1 type argument(s)
+  probes/A10_measure_on_nonnumeric.fs(20,8): error FS0033: The non-generic type 'System.Guid' does not expect any type arguments, but here is given 1 type argument(s)
+  probes/A10_measure_on_nonnumeric.fs(21,8): error FS0033: The non-generic type 'System.DateTimeOffset' does not expect any type arguments, but here is given 1 type argument(s)
+############ probes/B01_set_plain.fs
+  probes/B01_set_plain.fs(7,19): error FS0001: This expression was expected to have type    'ReadOnly<decimal>'    but here has type    'decimal'
+############ probes/B02_set_wrapped.fs
+  COMPILES
+############ probes/B03_where_plain.fs
+  probes/B03_where_plain.fs(7,24): error FS0001: This expression was expected to have type    'ReadOnly<decimal>'    but here has type    'decimal'
+############ probes/B04_arith.fs
+  probes/B04_arith.fs(3,59): error FS0043: Type constraint mismatch. The type     'ReadOnly<decimal>'    is not compatible with type    'decimal'
+  probes/B04_arith.fs(3,61): error FS0001: Type constraint mismatch. The type     'ReadOnly<decimal>'    is not compatible with type    'decimal'
+############ probes/B05_value_arith.fs
+  COMPILES

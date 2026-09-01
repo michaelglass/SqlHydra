@@ -396,6 +396,14 @@ module NormalizedPatterns =
     /// Delegates to the existing Property active pattern on the original Expression.
     let (|NProperty|_|) (nexp: NormalizedExpression) =
         match nexp with
+        // SPIKE (design B): see through the wrapper's `.Value` to the column underneath.
+        | NMemberAccess(NMemberAccess(_, inner), m) when
+            m.Member.Name = "Value"
+            && inner.Type.IsGenericType
+            && inner.Type.GetGenericTypeDefinition() = typedefof<SqlHydra.ReadOnly<_>> ->
+            match (inner :> Expression) with
+            | Property (p, ext) -> Some (p, ext)
+            | _ -> None
         | NMemberAccess(_, m) ->
             match (m :> Expression) with
             | Property (p, ext) -> Some (p, ext)

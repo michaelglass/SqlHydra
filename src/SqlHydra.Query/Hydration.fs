@@ -176,6 +176,15 @@ type ColumnReadMethods private () =
 let private isOptionType (t: Type) =
     t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<Option<_>>
 
+/// SPIKE (design B): is this SqlHydra.ReadOnly<_>?
+let private isReadOnlyWrapper (t: Type) =
+    t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<SqlHydra.ReadOnly<_>>
+
+/// SPIKE (design B): builds a ReadOnly<'T> around an already-read value.
+let private readOnlyWrapper (wrapperType: Type) =
+    let ctor = FSharpValue.PreComputeRecordConstructor(wrapperType)
+    fun (v: obj) -> ctor [| v |]
+
 /// Determines if a type is Nullable<_>.
 let private isNullableType (t: Type) =
     t.IsGenericType && t.GetGenericTypeDefinition() = typedefof<Nullable<_>>
@@ -184,6 +193,7 @@ let private isNullableType (t: Type) =
 let private unwrapType (t: Type) =
     if isOptionType t then t.GenericTypeArguments.[0]
     elif isNullableType t then t.GenericTypeArguments.[0]
+    elif isReadOnlyWrapper t then t.GenericTypeArguments.[0]   // SPIKE (design B)
     else t
 
 /// Checks if a type is a primitive/scalar (not an F# record).
@@ -217,6 +227,12 @@ let private buildRecordFieldReaders (reader: DbDataReader) (recordType: Type) (o
         // Reference types (e.g. string, byte[]) can be NULL in SQL even without Option/Nullable wrapper
         let isNullable = isNullable || (not isOpt && baseType.IsClass)
         let columnReader = makeColumnReader reader baseType isOpt isNullable
+        // SPIKE (design B): a ReadOnly<'T> field reads as 'T, then gets wrapped.
+        let columnReader =
+            if isReadOnlyWrapper fieldType then
+                let wrap = readOnlyWrapper fieldType
+                columnReader >> wrap
+            else columnReader
         let ordinal = ordinalLookup.[pi.Name]
         (ordinal, columnReader)
     )
@@ -230,6 +246,23 @@ let private buildEntityReadFn (tracker: OrdinalTracker) (entityType: Type) : (un
     let isOpt = isOptionType entityType
     let isNullable = isNullableType entityType
     let innerType = unwrapType entityType
+
+    // SPIKE (design B): a bare ReadOnly<'T> select projection is a scalar, not a joined table.
+    let roWrapper =
+        if isReadOnlyWrapper entityType then Some entityType
+        elif (isOptionType entityType || isNullableType entityType)
+             && isReadOnlyWrapper entityType.GenericTypeArguments.[0] then
+            Some entityType.GenericTypeArguments.[0]
+        else None
+
+    match roWrapper with
+    | Some w ->
+        let baseType = unwrapType w
+        let columnReader = makeColumnReader reader baseType isOpt isNullable
+        let wrap = readOnlyWrapper w
+        let ordinal = tracker.GetOrdinalAndIncrement()
+        fun () -> wrap (columnReader ordinal)
+    | None ->
 
     if FSharpType.IsRecord innerType then
         // Record type (possibly wrapped in Option for left joins)
