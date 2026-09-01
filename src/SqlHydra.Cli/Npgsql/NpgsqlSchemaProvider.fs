@@ -324,6 +324,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
                             Column.IsReadOnly = false
+                            Column.Doc = []
                         }
                     )
                 )
@@ -371,6 +372,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
                             Column.IsReadOnly = isReadOnly col
+                            Column.Doc = []
                         }
                     )
                 )
@@ -404,6 +406,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             }
                         Column.IsPK = col.IsPrimaryKey
                         Column.IsReadOnly = isReadOnly col
+                        Column.Doc = []
                     }
                 )
 
