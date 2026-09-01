@@ -276,7 +276,19 @@ module internal QueryUtils =
                 failwith "Either an `entity`, `set`, or `setRaw` operation must be present in an `update` expression."
             | None, setValues -> setValues
 
-        // Never in a SET clause; filtered here so `entity row` still works.
+        // `set` names a column the caller chose, and every column reaching this check is one
+        // the database refuses to write, so there is no reading of it but a bug. Dropping it
+        // would report an update that silently did nothing. (`setRaw` is left alone: it can
+        // write the one value that is legal, DEFAULT.)
+        match spec.SetValues |> List.tryFind (fun (col, _) -> readOnlyColumns.Contains col) with
+        | Some (col, _) ->
+            failwithf
+                "Cannot `set` read-only column '%s': the database owns its value and rejects a statement that names it. Remove the `set`."
+                col
+        | None -> ()
+
+        // From `entity row`, which carries every field whether the caller meant to write it
+        // or not; filtered so a record read back can be written whole.
         let kvps = kvps |> List.filter (fun (col, _) -> not (readOnlyColumns.Contains col))
 
         {

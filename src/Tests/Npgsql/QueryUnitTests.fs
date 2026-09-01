@@ -1876,3 +1876,44 @@ let ``read-only column: a whole-entity select appends nothing, because SELECT * 
         }
         |> toSql
     sql =! "SELECT \"i\".* FROM \"sales\".\"invoice\" AS \"i\""
+
+[<Test>]
+let ``read-only column: an explicit set on one fails, naming it``() =
+    // 4.1.1 let this reach PostgreSQL, which refused it. Dropping it instead would report
+    // an update that did nothing.
+    let build () =
+        update {
+            for i in ReadOnlyColumnFixture.invoice do
+            set i.tax 99m
+            where (i.currencycode = "BTC")
+        }
+        |> toUpdateSql
+        |> ignore
+    let ex = Assert.Throws<Exception>(fun () -> build ())
+    test <@ ex.Message.Contains("'tax'") @>
+
+[<Test>]
+let ``system column: an explicit set on one fails too``() =
+    // `[<SystemColumn>]` derives from `[<ReadOnlyColumn>]`, so one check covers both.
+    let build () =
+        update {
+            for c in SystemColumnFixture.currency do
+            set c.xmin 42u
+            where (c.currencycode = "BTC")
+        }
+        |> toUpdateSql
+        |> ignore
+    let ex = Assert.Throws<Exception>(fun () -> build ())
+    test <@ ex.Message.Contains("'xmin'") @>
+
+[<Test>]
+let ``read-only column: setRaw is left alone, so DEFAULT stays reachable``() =
+    // The one value PostgreSQL accepts for a generated column.
+    let sql =
+        update {
+            for i in ReadOnlyColumnFixture.invoice do
+            setRaw i.tax "DEFAULT"
+            where (i.currencycode = "BTC")
+        }
+        |> toUpdateSql
+    sql.Contains("\"tax\" = DEFAULT") =! true
