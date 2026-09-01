@@ -322,9 +322,11 @@ let ``The schema provider marks the columns PostgreSQL generates, and only those
                 ConnectionString = DB.connectionString
                 Filters = { Filters.Empty with Includes = [ "sales/sqlhydra_readonly_probe" ] } }
 
+        // Found by name, not `exactlyOne`: materialized views are appended after
+        // `SchemaFilters.filterTables` runs, so the include filter does not narrow them.
         let isReadOnly =
             (NpgsqlSchemaProvider.getSchema(cfg, false, [])).Tables
-            |> List.exactlyOne
+            |> List.find (fun tbl -> tbl.Name = "sqlhydra_readonly_probe")
             |> fun tbl -> tbl.Columns |> List.map (fun col -> col.Name, col.ReadOnly.IsSome) |> Map.ofList
 
         isReadOnly["id"] =! true     // GENERATED ALWAYS AS IDENTITY
