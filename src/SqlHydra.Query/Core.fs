@@ -1,4 +1,4 @@
-﻿namespace SqlHydra.Query
+namespace SqlHydra.Query
 
 open System.Reflection
 open System.Collections.Generic
@@ -219,10 +219,14 @@ module internal QueryUtils =
         p.GetValue(entity)
         |> getQueryParameterForValue p
 
+    /// Cached: `fromInsert` and `fromUpdate` run per query built, and the answer is a property
+    /// of the type, so reflecting on every one is pure waste. Mirrors what hydration does.
+    let private readOnlyColumnNamesByType = System.Collections.Concurrent.ConcurrentDictionary<Type, Set<string>>()
+
     /// The `[<ReadOnlyColumn>]` field names on `t` (Option/Nullable unwrapped); empty when `t`
     /// is not a record. These are the columns the database owns: never in an INSERT column
     /// list, never in an UPDATE SET clause.
-    let internal getReadOnlyColumnNames (t: Type) : Set<string> =
+    let private readReadOnlyColumnNames (t: Type) : Set<string> =
         let recordType =
             if t.IsGenericType
                && (t.GetGenericTypeDefinition() = typedefof<Option<_>>
@@ -236,6 +240,9 @@ module internal QueryUtils =
             |> Array.map _.Name
             |> Set.ofArray
         else Set.empty
+
+    let internal getReadOnlyColumnNames (t: Type) : Set<string> =
+        readOnlyColumnNamesByType.GetOrAdd(t, readReadOnlyColumnNames)
 
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
         let readOnlyColumns = getReadOnlyColumnNames typeof<'T>

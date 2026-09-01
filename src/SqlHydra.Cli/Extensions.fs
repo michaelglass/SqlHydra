@@ -1,4 +1,4 @@
-﻿module SqlHydra.Extensions
+module SqlHydra.Extensions
 
 open System
 open System.IO
