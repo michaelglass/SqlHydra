@@ -1721,3 +1721,98 @@ let ``two ordinary .NET calls in a where are evaluated, not rendered``() =
         |> ignore
     let ex = Assert.Throws<NotImplementedException>(fun () -> build ())
     test <@ ex.Message.Contains("Value to value") @>
+
+// Fixture standing in for generated output: `id` is GENERATED ALWAYS AS IDENTITY and
+// `tax` is GENERATED ALWAYS AS (price * 0.1) STORED. PostgreSQL rejects naming either.
+
+module ReadOnlyColumnFixture =
+    module sales =
+        [<CLIMutable>]
+        type invoice =
+            { [<SqlHydra.ReadOnlyColumn>]
+              id: int
+              currencycode: string
+              price: decimal
+              [<SqlHydra.ReadOnlyColumn>]
+              tax: decimal }
+
+    let invoice = table<sales.invoice>
+
+    let sampleRow : sales.invoice =
+        { id = 0
+          currencycode = "BTC"
+          price = 10m
+          tax = 0m }
+
+[<Test>]
+let ``read-only column: insert leaves it out of the column list``() =
+    // Without the filter this names "id" and "tax", and PostgreSQL refuses the whole INSERT.
+    let sql =
+        insert {
+            into ReadOnlyColumnFixture.invoice
+            entity ReadOnlyColumnFixture.sampleRow
+        }
+        |> toInsertSql
+    sql =! """INSERT INTO "sales"."invoice" ("currencycode", "price") VALUES (@p0, @p1)"""
+
+[<Test>]
+let ``read-only column: a whole-entity select is unchanged, because SELECT * returns it``() =
+    // A generated column is read-only, not hidden: reads need no special handling.
+    let sql =
+        select {
+            for i in ReadOnlyColumnFixture.invoice do
+            select i
+        }
+        |> toSql
+    sql =! "SELECT \"i\".* FROM \"sales\".\"invoice\" AS \"i\""
+
+[<Test>]
+let ``read-only column: a where predicate treats it as an ordinary column``() =
+    let sql =
+        select {
+            for i in ReadOnlyColumnFixture.invoice do
+            where (i.id = 1)
+            select i
+        }
+        |> toSql
+    sql =! "SELECT \"i\".* FROM \"sales\".\"invoice\" AS \"i\" WHERE (\"i\".\"id\" = @p0)"
+
+[<Test>]
+let ``read-only column: setRaw is left alone, so DEFAULT stays reachable``() =
+    // The one value PostgreSQL accepts for a generated column.
+    let sql =
+        update {
+            for i in ReadOnlyColumnFixture.invoice do
+            setRaw i.tax "DEFAULT"
+            where (i.currencycode = "BTC")
+        }
+        |> toUpdateSql
+    sql.Contains("\"tax\" = DEFAULT") =! true
+
+[<Test>]
+let ``read-only column: excludeColumn on one is a no-op``() =
+    // Consumers told to write `excludeColumn row.tax` today have to keep working.
+    let withCall =
+        insert {
+            for i in ReadOnlyColumnFixture.invoice do
+            entity ReadOnlyColumnFixture.sampleRow
+            excludeColumn i.tax
+        }
+        |> toInsertSql
+    let without =
+        insert {
+            into ReadOnlyColumnFixture.invoice
+            entity ReadOnlyColumnFixture.sampleRow
+        }
+        |> toInsertSql
+    withCall =! without
+
+[<Test>]
+let ``read-only column: a table without one is unaffected``() =
+    let sql =
+        insert {
+            into sales.currency
+            entity { currencycode = "BTC"; name = "BitCoin"; modifieddate = DateTime.Today }
+        }
+        |> toInsertSql
+    sql =! """INSERT INTO "sales"."currency" ("currencycode", "name", "modifieddate") VALUES (@p0, @p1, @p2)"""

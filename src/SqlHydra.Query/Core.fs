@@ -1,6 +1,7 @@
 namespace SqlHydra.Query
 
 open System.Reflection
+open System.Collections.Concurrent
 open System.Collections.Generic
 open System
 
@@ -219,22 +220,38 @@ module internal QueryUtils =
         p.GetValue(entity)
         |> getQueryParameterForValue p
 
+    /// Cached: fixed per type, and looked up on every query build.
+    let private readOnlyColumnNames = ConcurrentDictionary<Type, Set<string>>()
+
+    /// `[<ReadOnlyColumn>]` fields: the database owns these, so they are never written.
+    let internal getReadOnlyColumnNames (t: Type) =
+        readOnlyColumnNames.GetOrAdd(t, Func<Type, Set<string>>(fun ty ->
+            if FSharp.Reflection.FSharpType.IsRecord ty then
+                FSharp.Reflection.FSharpType.GetRecordFields(ty)
+                |> Array.filter (fun p -> Attribute.IsDefined(p, typeof<SqlHydra.ReadOnlyColumnAttribute>, false))
+                |> Array.map (fun p -> p.Name)
+                |> Set.ofArray
+            else Set.empty))
+
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
+        let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
+
         let kvps =
             match spec.Entity, spec.SetValues with
             | Some entity, [] ->
-                match spec.Fields with
-                | [] ->
-                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
-                    |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
-                    |> Array.toList
+                let properties =
+                    match spec.Fields with
+                    | [] ->
+                        FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                    | fields ->
+                        let included = fields |> Set.ofList
+                        FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                        |> Array.filter (fun p -> included.Contains(p.Name))
 
-                | fields ->
-                    let included = fields |> Set.ofList
-                    FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
-                    |> Array.filter (fun p -> included.Contains(p.Name))
-                    |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
-                    |> Array.toList
+                properties
+                |> Array.filter (fun p -> not (readOnlyColumns.Contains p.Name))
+                |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
+                |> Array.toList
 
             | Some _, _ -> failwith "Cannot have both `entity` and `set` operations in an `update` expression."
             | None, [] when spec.RawSetValues.IsEmpty ->
@@ -252,6 +269,8 @@ module internal QueryUtils =
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
+        let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
+
         let includedProperties =
             match spec.Fields with
             | [] ->
@@ -260,6 +279,7 @@ module internal QueryUtils =
                 let included = fields |> Set.ofList
                 FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
                 |> Array.filter (fun p -> included.Contains(p.Name))
+            |> Array.filter (fun p -> not (readOnlyColumns.Contains p.Name))
 
         let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
 
