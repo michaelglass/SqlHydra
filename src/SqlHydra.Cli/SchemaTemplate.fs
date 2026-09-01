@@ -95,6 +95,7 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
                     | _ ->
                         None
 
+                if col.IsReadOnly then "[<ReadOnlyColumn>]"
                 if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value
                 let colName = columnName { NamingContext.Table = table; Column = Some col }
                 $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks colName}: {columnPropertyType}"""
