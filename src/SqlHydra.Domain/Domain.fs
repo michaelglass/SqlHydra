@@ -62,8 +62,22 @@ type ReadOnlyColumn =
         | SystemColumn -> true
         | Generated | UnwritableViewColumn -> false
 
-    /// True when `DEFAULT` is a value a write may give the column. Only a generated column
-    /// takes it; PostgreSQL refuses `SET xmin = DEFAULT` and `SET doubled = DEFAULT` alike.
+    /// True when `DEFAULT` is a value a write may give the column, **reached through the base
+    /// table**. PostgreSQL refuses `SET xmin = DEFAULT` and `SET doubled = DEFAULT` alike.
+    ///
+    /// The name claims more than the answer covers. Whether `DEFAULT` is accepted turns on
+    /// three things, not one — the kind, whether the write goes through a table or a view,
+    /// and whether it is an INSERT or an UPDATE:
+    ///
+    ///     UPDATE base SET tax = DEFAULT                 accepted
+    ///     INSERT INTO view (price, tax) VALUES (5, DEFAULT)  accepted
+    ///     UPDATE view SET tax = DEFAULT                 428C9 "can only be updated to DEFAULT"
+    ///
+    /// Only the first row is what this member reports, which is sound today because
+    /// `Generated` is assigned to base-table columns alone — the generation flags are read
+    /// from `relkind in ('r', 'p')`, and a view's own `pg_attribute` rows carry none. A
+    /// generated column reached through a view is a case nothing currently detects, and it
+    /// would fit neither this kind nor `UnwritableViewColumn`.
     member this.AcceptsDefault =
         match this with
         | Generated -> true
