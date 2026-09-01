@@ -1081,3 +1081,27 @@ let ``read-only columns: an entity update on the same table writes only the writ
 
     do! ReadOnlyColumnFixture.exec ctx "DROP TABLE sales.sqlhydra_readonly;"
 }
+
+[<Test>]
+let ``read-only columns: getId returns the generated id, though the field list carries the other read-only columns``() = task {
+    // `getId` routes through `excludeColumn`, which expands the field list to every field
+    // but the id — `tax` among them, named by nobody. Filtering rather than raising is what
+    // keeps one of the most common insert idioms working on a table like this.
+    use! ctx = db.OpenContextAsync()
+    do! ReadOnlyColumnFixture.exec ctx ReadOnlyColumnFixture.ddl
+
+    let! newId =
+        insertTask ctx {
+            for i in ReadOnlyColumnFixture.invoices do
+            entity ReadOnlyColumnFixture.row
+            getId i.id
+        }
+    newId >! 0
+
+    let! rows = ReadOnlyColumnFixture.read ctx
+    let row = rows |> Seq.exactlyOne
+    row.id =! newId
+    row.tax =! 1.0m
+
+    do! ReadOnlyColumnFixture.exec ctx "DROP TABLE sales.sqlhydra_readonly;"
+}

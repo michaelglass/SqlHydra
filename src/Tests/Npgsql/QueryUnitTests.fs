@@ -1969,3 +1969,70 @@ let ``read-only column: distinct on a whole-entity select is unaffected``() =
         }
         |> toSql
     sql =! "SELECT DISTINCT \"i\".* FROM \"sales\".\"invoice\" AS \"i\""
+
+[<Test>]
+let ``read-only column: getId still works, though Fields carries the other read-only columns``() =
+    // `getId` routes through `excludeColumn`, which expands Fields to every field but the id
+    // — `tax` included, with nobody having named it. Filtering, not raising, is what keeps
+    // this working; a rule that raised on Fields would make getId unusable here.
+    let sql =
+        insert {
+            for i in ReadOnlyColumnFixture.invoice do
+            entity ReadOnlyColumnFixture.sampleRow
+            getId i.id
+        }
+        |> toInsertSql
+    sql =! """INSERT INTO "sales"."invoice" ("currencycode", "price") VALUES (@p0, @p1) RETURNING "id";"""
+
+[<Test>]
+let ``read-only column: excludeColumn on one is a no-op``() =
+    // Excluding a read-only column asks for what already happens, so it must stay silent:
+    // consumers told to write `excludeColumn row.xmin` have to keep working.
+    let withCall =
+        insert {
+            for i in ReadOnlyColumnFixture.invoice do
+            entity ReadOnlyColumnFixture.sampleRow
+            excludeColumn i.tax
+        }
+        |> toInsertSql
+    let without =
+        insert {
+            into ReadOnlyColumnFixture.invoice
+            entity ReadOnlyColumnFixture.sampleRow
+        }
+        |> toInsertSql
+    withCall =! without
+
+[<Test>]
+let ``system column: excludeColumn on one is a no-op, on insert and on update``() =
+    let insertWith =
+        insert {
+            for c in SystemColumnFixture.currency do
+            entity SystemColumnFixture.sampleRow
+            excludeColumn c.xmin
+        }
+        |> toInsertSql
+    let insertWithout =
+        insert {
+            into SystemColumnFixture.currency
+            entity SystemColumnFixture.sampleRow
+        }
+        |> toInsertSql
+    insertWith =! insertWithout
+
+    let updateWith =
+        update {
+            for c in SystemColumnFixture.currency do
+            entity SystemColumnFixture.sampleRow
+            excludeColumn c.xmin
+            where (c.currencycode = "BTC")
+        }
+        |> toUpdateSql
+    let updateWithout =
+        update {
+            for c in SystemColumnFixture.currency do
+            entity SystemColumnFixture.sampleRow
+            where (c.currencycode = "BTC")
+        }
+        |> toUpdateSql
+    updateWith =! updateWithout
