@@ -148,7 +148,9 @@ type Config =
         /// SqlHydra.Query Integration: creates a SqlHydra.Query table declaration for each table
         TableDeclarations: bool
 
-        /// System columns to generate, named one at a time, e.g. `[ "xmin" ]`. PostgreSQL only.
+        /// SqlHydra.Query Integration: system columns to generate, one per entry and named
+        /// per table as `{schema}/{table}.{column}`, e.g. `[ "sales/currency.xmin" ]`.
+        /// PostgreSQL only.
         SystemColumns: string list
 
         /// Readers: provides a Db provider specific IDataReader type (for access to Db-specific features)

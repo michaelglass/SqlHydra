@@ -1,6 +1,7 @@
 module SqlHydra.Npgsql.NpgsqlSchemaProvider
 
 open System.Data
+open GlobExpressions
 open SqlHydra.Domain
 open SqlHydra
 
@@ -18,9 +19,29 @@ let isBaseTableType tableType =
 let isDatabaseGenerated (attgenerated: string) (attidentity: string) =
     attgenerated <> "" || attidentity = "a"
 
+/// A `system_columns` entry names one column of one table: `{schema}/{table}.{column}`,
+/// the table part a glob — the grammar a column filter in `[filters]` already uses.
+let parseSystemColumn (entry: string) : string * Column =
+    match entry.LastIndexOf '.' with
+    | -1 ->
+        failwithf
+            "`system_columns` names '%s'. Name the table too, as \"{schema}/{table}.{column}\" — e.g. \"sales/currency.xmin\"."
+            entry
+    | i ->
+        entry.Substring(0, i), NpgsqlDataTypes.toSystemColumn (entry.Substring(i + 1))
+
+/// The system columns configured for one table. A table the config does not name gets
+/// none: `SELECT *` omits a system column, so a record that declares one fails to hydrate
+/// on every whole-entity read — contributing it to an unasked-for table breaks that table.
+let systemColumnsFor (entries: (string * Column) list) schema table : Column list =
+    entries
+    |> List.filter (fun (tablePattern, _) -> Glob(tablePattern).IsMatch $"{schema}/{table}")
+    |> List.map snd
+    |> List.distinctBy (fun col -> col.Name)
+
 let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
-    // Up front, so a misspelled entry fails before the first query.
-    let configuredSystemColumns = cfg.SystemColumns |> List.map NpgsqlDataTypes.toSystemColumn
+    // Up front, so a malformed or misspelled entry fails before the first query.
+    let configuredSystemColumns = cfg.SystemColumns |> List.map parseSystemColumn
 
     use conn = new Npgsql.NpgsqlConnection(cfg.ConnectionString)
     conn.Open()
@@ -390,7 +411,8 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                 |> Seq.toList
 
             // Not in `information_schema`, so appended rather than discovered. Views have none.
-            let systemColumns = if isBaseTable then configuredSystemColumns else []
+            let systemColumns =
+                if isBaseTable then systemColumnsFor configuredSystemColumns tbl.Schema tbl.Name else []
 
             if filteredColumns |> Seq.isEmpty then
                 None
@@ -405,6 +427,18 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                 }
         )
         |> Seq.toList
+
+    // A pattern that matched nothing is a typo or a stale entry, and either way generates
+    // no field: the compile error lands wherever someone reads the column instead.
+    let baseTablePaths =
+        tables
+        |> List.filter (fun tbl -> tbl.Type = TableType.Table)
+        |> List.map (fun tbl -> $"{tbl.Schema}/{tbl.Name}")
+
+    for tablePattern, _ in configuredSystemColumns do
+        let glob = Glob tablePattern
+        if not (baseTablePaths |> List.exists (fun path -> glob.IsMatch path)) then
+            failwithf "`system_columns` names table '%s', which matches no generated table." tablePattern
 
     {
         Tables = tables @ matViews

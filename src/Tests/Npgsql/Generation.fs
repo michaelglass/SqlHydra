@@ -136,7 +136,7 @@ let ``A column is read-only when the database generates it, and BY DEFAULT ident
 
 // Read-only column generation. DB-free: drives SchemaTemplate.generate with a synthetic schema.
 
-let private cfgFor systemColumns : Config =
+let private baseCfg : Config =
     {
         ConnectionString = ""
         OutputFile = ""
@@ -146,7 +146,7 @@ let private cfgFor systemColumns : Config =
         NullablePropertyType = NullablePropertyType.Option
         ProviderDbTypeAttributes = true
         TableDeclarations = true
-        SystemColumns = systemColumns
+        SystemColumns = []
         Readers = None
         Filters = Filters.Empty
         TypeMappingExtensions = []
@@ -197,17 +197,17 @@ let private schemaOf columns : Schema =
         Enums = []
     }
 
-let private generateColumns systemColumns columns =
+let private generateColumns columns =
     let version : Version.InformationalVersion =
         { InformationalVersion = "4.1.0-test"; Version = System.Version(4, 1, 0); PreReleaseSuffix = None }
-    SchemaTemplate.generate (cfgFor systemColumns) Provider.instance (schemaOf columns) version []
+    SchemaTemplate.generate baseCfg Provider.instance (schemaOf columns) version []
 
 let private generateWith systemColumns =
-    generateColumns systemColumns (systemColumns |> List.map NpgsqlDataTypes.toSystemColumn)
+    generateColumns (systemColumns |> List.map NpgsqlDataTypes.toSystemColumn)
 
 [<Test>]
 let ``A generated column is read-only, and stays in SELECT *``() =
-    let code = generateColumns [] [ generatedRate ]
+    let code = generateColumns [ generatedRate ]
     code.Contains("[<ReadOnlyColumn>]") =! true
     code.Contains("[<SystemColumn>]") =! false
 
@@ -259,6 +259,38 @@ let ``A misspelled system column fails generation, naming the six that exist``()
 let ``A table declaration is still emitted for a table with a system column``() =
     generateWith([ "xmin" ]).Contains("let currency = table<currency>") =! true
 
+// Which tables a configured system column lands on.
+
+let private configured entries = entries |> List.map NpgsqlSchemaProvider.parseSystemColumn
+
+let private namesFor entries schema table =
+    NpgsqlSchemaProvider.systemColumnsFor entries schema table |> List.map (fun col -> col.Name)
+
+[<Test>]
+let ``A system column goes only to the table its entry names``() =
+    let entries = configured [ "sales/currency.xmin" ]
+    namesFor entries "sales" "currency" =! [ "xmin" ]
+    namesFor entries "sales" "salesorderheader" =! []
+    namesFor entries "person" "currency" =! []
+
+[<Test>]
+let ``The table part of an entry is a glob, as it is in the filters``() =
+    let entries = configured [ "sales/*.xmin"; "person/address.ctid" ]
+    namesFor entries "sales" "currency" =! [ "xmin" ]
+    namesFor entries "person" "address" =! [ "ctid" ]
+    namesFor entries "person" "person" =! []
+
+[<Test>]
+let ``Entries overlapping on one table generate each column once``() =
+    let entries = configured [ "sales/currency.xmin"; "sales/*.xmin"; "sales/currency.ctid" ]
+    namesFor entries "sales" "currency" =! [ "xmin"; "ctid" ]
+
+[<Test>]
+let ``An entry that names no table fails, saying how to name one``() =
+    // The shape this had before it was per-table, and the one people will try first.
+    let ex = Assert.Throws<System.Exception>(fun () -> NpgsqlSchemaProvider.parseSystemColumn "xmin" |> ignore)
+    ex.Message.Contains("{schema}/{table}.{column}") =! true
+
 // Read-only detection against a live PostgreSQL: the four column kinds in one table.
 
 let private readOnlyProbeDdl =
@@ -284,7 +316,7 @@ let ``The schema provider marks the columns PostgreSQL generates, and only those
 
     try
         let cfg =
-            { cfgFor [] with
+            { baseCfg with
                 ConnectionString = DB.connectionString
                 Filters = { Filters.Empty with Includes = [ "sales/sqlhydra_readonly_probe" ] } }
 
@@ -299,3 +331,34 @@ let ``The schema provider marks the columns PostgreSQL generates, and only those
         isReadOnly["price"] =! false
     finally
         execute "DROP TABLE IF EXISTS sales.sqlhydra_readonly_probe;"
+
+let private optInProbeDdl =
+    """
+    DROP TABLE IF EXISTS sales.sqlhydra_optin;
+    DROP TABLE IF EXISTS sales.sqlhydra_no_optin;
+    CREATE TABLE sales.sqlhydra_optin (id int PRIMARY KEY);
+    CREATE TABLE sales.sqlhydra_no_optin (id int PRIMARY KEY);
+    """
+
+[<Test>]
+let ``A table that does not opt in gets no system column, alongside one that does``() =
+    execute optInProbeDdl
+
+    try
+        let cfg =
+            { baseCfg with
+                ConnectionString = DB.connectionString
+                SystemColumns = [ "sales/sqlhydra_optin.xmin" ]
+                Filters = { Filters.Empty with Includes = [ "sales/sqlhydra_optin"; "sales/sqlhydra_no_optin" ] } }
+
+        let schema = NpgsqlSchemaProvider.getSchema(cfg, false, [])
+
+        let hasXmin name =
+            schema.Tables
+            |> List.find (fun tbl -> tbl.Name = name)
+            |> fun tbl -> tbl.Columns |> List.exists (fun col -> col.Name = "xmin")
+
+        hasXmin "sqlhydra_optin" =! true
+        hasXmin "sqlhydra_no_optin" =! false
+    finally
+        execute "DROP TABLE IF EXISTS sales.sqlhydra_optin; DROP TABLE IF EXISTS sales.sqlhydra_no_optin;"

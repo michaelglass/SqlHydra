@@ -867,15 +867,21 @@ nothing may write and that — unlike a generated column — `SELECT *` does not
 most useful is `xmin`, the row version — it changes on every write to the row, which makes
 optimistic concurrency a plain column comparison instead of a lock.
 
-Name the ones you want, one at a time, in the `[sqlhydra_query_integration]` section:
+Name the ones you want per table, using the `{schema}/{table}.{column}` path `[filters]`
+already uses — the table part globs:
 
 ```toml
 [sqlhydra_query_integration]
 provider_db_type_attributes = true
-system_columns = ["xmin"]
+system_columns = ["sales/currency.xmin"]
 ```
 
-Each named column is added to every generated table record, tagged `[<SystemColumn>]` — a
+A table you do not name gets nothing, which is the point. `SELECT *` does not return a
+system column, so a record that declares one has to name it on every whole-entity read of
+that table — worth it on the three tables that want row versioning, not on the other
+ninety-four.
+
+The named column is added to that table's record, tagged `[<SystemColumn>]` — a
 `[<ReadOnlyColumn>]`, and additionally appended by name to a whole-entity `select`, since
 `SELECT *` would leave it out. Everywhere else it is an ordinary column:
 
@@ -918,8 +924,9 @@ is updated and when `VACUUM FULL` or `CLUSTER` moves it. Use the primary key for
 and `xmin` for versioning. It is generated with that warning as a doc comment, so it
 reaches the reader rather than only whoever wrote the config.
 
-Naming something that is not one of the six fails generation rather than quietly emitting
-nothing. `system_columns` is PostgreSQL-only; other providers ignore it.
+Generation fails, rather than quietly emitting nothing, on a column that is not one of the
+six and on a table pattern that matches nothing. `system_columns` is PostgreSQL-only;
+other providers ignore it.
 
 ### SQLite
 

@@ -181,10 +181,10 @@ let ``Read: system_columns``() =
         [sqlhydra_query_integration]
         provider_db_type_attributes = true
         table_declarations = true
-        system_columns = [ "xmin", "ctid" ]
+        system_columns = [ "sales/currency.xmin", "person/address.ctid" ]
         """
 
-    TomlConfigParser.read(toml).SystemColumns =! [ "xmin"; "ctid" ]
+    TomlConfigParser.read(toml).SystemColumns =! [ "sales/currency.xmin"; "person/address.ctid" ]
 
 [<Test>]
 let ``Save: omits system_columns when none are configured``() =
@@ -207,4 +207,4 @@ let ``Save: omits system_columns when none are configured``() =
         }
 
     TomlConfigParser.save(cfg).Contains("system_columns") =! false
-    TomlConfigParser.save({ cfg with SystemColumns = [ "xmin" ] }).Contains("system_columns") =! true
+    TomlConfigParser.save({ cfg with SystemColumns = [ "sales/currency.xmin" ] }).Contains("system_columns") =! true
