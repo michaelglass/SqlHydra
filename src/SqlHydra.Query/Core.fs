@@ -219,12 +219,8 @@ module internal QueryUtils =
         p.GetValue(entity)
         |> getQueryParameterForValue p
 
-    /// True when a record field is marked `[<SystemColumn>]`.
-    let internal isSystemColumnProp (p: MemberInfo) =
-        Attribute.IsDefined(p, typeof<SqlHydra.SystemColumnAttribute>, false)
-
-    /// `[<SystemColumn>]` field names on `t` (Option/Nullable unwrapped); empty if not a record.
-    let internal getSystemColumnNames (t: Type) : Set<string> =
+    /// Field names on `t` carrying `attribute` (Option/Nullable unwrapped); empty if not a record.
+    let internal getMarkedFieldNames (attribute: Type) (t: Type) : Set<string> =
         let recordType =
             if t.IsGenericType
                && (t.GetGenericTypeDefinition() = typedefof<Option<_>>
@@ -234,13 +230,22 @@ module internal QueryUtils =
 
         if FSharp.Reflection.FSharpType.IsRecord recordType then
             FSharp.Reflection.FSharpType.GetRecordFields(recordType)
-            |> Array.filter isSystemColumnProp
+            |> Array.filter (fun p -> Attribute.IsDefined(p, attribute, false))
             |> Array.map (fun p -> p.Name)
             |> Set.ofArray
         else Set.empty
 
+    /// `[<ReadOnlyColumn>]` fields: the database owns these, so they are never written.
+    /// `[<SystemColumn>]` derives from it, and attribute lookup matches subclasses.
+    let internal getReadOnlyColumnNames (t: Type) =
+        getMarkedFieldNames typeof<SqlHydra.ReadOnlyColumnAttribute> t
+
+    /// `[<SystemColumn>]` fields: `SELECT *` skips these, so they are named to be read.
+    let internal getSystemColumnNames (t: Type) =
+        getMarkedFieldNames typeof<SqlHydra.SystemColumnAttribute> t
+
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
-        let systemColumns = getSystemColumnNames typeof<'T>
+        let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
 
         let kvps =
             match spec.Entity, spec.SetValues with
@@ -264,7 +269,7 @@ module internal QueryUtils =
             | None, setValues -> setValues
 
         // Never in a SET clause; filtered here so `entity row` still works.
-        let kvps = kvps |> List.filter (fun (col, _) -> not (systemColumns.Contains col))
+        let kvps = kvps |> List.filter (fun (col, _) -> not (readOnlyColumns.Contains col))
 
         {
             Table = spec.Table
@@ -277,7 +282,7 @@ module internal QueryUtils =
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
-        let systemColumns = getSystemColumnNames typeof<'T>
+        let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
 
         let includedProperties =
             match spec.Fields with
@@ -288,7 +293,7 @@ module internal QueryUtils =
                 FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
                 |> Array.filter (fun p -> included.Contains(p.Name))
             // Never INSERTed, for the same reason.
-            |> Array.filter (fun p -> not (systemColumns.Contains p.Name))
+            |> Array.filter (fun p -> not (readOnlyColumns.Contains p.Name))
 
         let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
 

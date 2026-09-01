@@ -42,13 +42,20 @@ type TypeMapping =
     member this.IsValueType() = 
         isValueType this.ClrType
 
-/// A read-only [system column](https://www.postgresql.org/docs/current/ddl-system-columns.html):
-/// excluded by `SELECT *`, never written.
-type SystemColumn =
+/// A column the database writes and the caller cannot: a
+/// [generated or identity column](https://www.postgresql.org/docs/current/ddl-generated-columns.html),
+/// or a [system column](https://www.postgresql.org/docs/current/ddl-system-columns.html).
+type ReadOnlyColumn =
     {
         /// Doc lines emitted above the generated field, so a caution reaches the use site.
         Doc: string list
+
+        /// True only for a system column, which `SELECT *` does not return, so a
+        /// whole-entity select has to name it. A generated column comes back normally.
+        ExcludedFromSelectStar: bool
     }
+    /// A generated or `GENERATED ALWAYS AS IDENTITY` column.
+    static member Generated = { Doc = []; ExcludedFromSelectStar = false }
 
 type Column = 
     {
@@ -56,8 +63,8 @@ type Column =
         TypeMapping: TypeMapping
         IsNullable: bool
         IsPK: bool
-        /// `Some` for a read-only system column; `None` for an ordinary column.
-        SystemColumn: SystemColumn option
+        /// `Some` when the database owns the value; `None` for an ordinary, writable column.
+        ReadOnly: ReadOnlyColumn option
     }
 
 type TableType = 

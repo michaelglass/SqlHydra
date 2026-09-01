@@ -95,15 +95,16 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
                     | _ ->
                         None
 
-                // A read-only system column. The doc comment is emitted first so the caution
-                // on a column like `ctid` reaches every use site, not only whoever set up
-                // the config; the attribute is what SqlHydra.Query reads.
-                match col.SystemColumn with
-                | Some systemColumn ->
-                    for line in systemColumn.Doc do
+                // Doc first, so a caution like `ctid`'s reaches every use site and not only
+                // whoever set up the config; the attributes are what SqlHydra.Query reads.
+                match col.ReadOnly with
+                | Some readOnly ->
+                    for line in readOnly.Doc do
                         $"/// {line}"
 
-                    "[<SystemColumn>]"
+                    if readOnly.ExcludedFromSelectStar
+                    then "[<SystemColumn>]" // derives from ReadOnlyColumn
+                    else "[<ReadOnlyColumn>]"
                 | None -> ()
 
                 if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value

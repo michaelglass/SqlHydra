@@ -11,7 +11,7 @@ let col nm =
         TypeMapping = { ClrType = ""; ColumnTypeAlias = ""; DbType = System.Data.DbType.String; ProviderDbType = None }
         IsNullable = false
         IsPK = false
-        SystemColumn = None
+        ReadOnly = None
     }
 
 let equalLists lst1 lst2 = 

@@ -1818,3 +1818,61 @@ let ``system column: a where predicate treats it as an ordinary column``() =
         }
         |> toUpdateSql
     sql =! """UPDATE "sales"."currency" SET "name" = @p0 WHERE (("sales"."currency"."currencycode" = @p1) AND ("sales"."currency"."xmin" = @p2))"""
+
+// Read-only columns. Hand-written fixture standing in for generated output: `id` is
+// GENERATED ALWAYS AS IDENTITY and `tax` is GENERATED ALWAYS AS (price * 0.1) STORED.
+// PostgreSQL rejects a statement naming either.
+
+module ReadOnlyColumnFixture =
+    module sales =
+        [<CLIMutable>]
+        type invoice =
+            { [<SqlHydra.ReadOnlyColumn>]
+              id: int
+              currencycode: string
+              price: decimal
+              [<SqlHydra.ReadOnlyColumn>]
+              tax: decimal }
+
+    let invoice = table<sales.invoice>
+
+    let sampleRow : sales.invoice =
+        { id = 0
+          currencycode = "BTC"
+          price = 10m
+          tax = 0m }
+
+[<Test>]
+let ``read-only column: insert leaves it out of the column list``() =
+    // Without the filter this names "id" and "tax", and PostgreSQL refuses the whole INSERT.
+    let sql =
+        insert {
+            into ReadOnlyColumnFixture.invoice
+            entity ReadOnlyColumnFixture.sampleRow
+        }
+        |> toInsertSql
+    sql =! """INSERT INTO "sales"."invoice" ("currencycode", "price") VALUES (@p0, @p1)"""
+
+[<Test>]
+let ``read-only column: entity update leaves it out of the SET clause``() =
+    let sql =
+        update {
+            for i in ReadOnlyColumnFixture.invoice do
+            entity ReadOnlyColumnFixture.sampleRow
+            where (i.currencycode = "BTC")
+        }
+        |> toUpdateSql
+    sql.Contains("\"id\" =") =! false
+    sql.Contains("\"tax\" =") =! false
+    sql.Contains("\"price\" = @p") =! true
+
+[<Test>]
+let ``read-only column: a whole-entity select appends nothing, because SELECT * returns it``() =
+    // The half that separates the two properties: read-only, but not hidden from `*`.
+    let sql =
+        select {
+            for i in ReadOnlyColumnFixture.invoice do
+            select i
+        }
+        |> toSql
+    sql =! "SELECT \"i\".* FROM \"sales\".\"invoice\" AS \"i\""

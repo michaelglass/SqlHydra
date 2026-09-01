@@ -100,7 +100,7 @@ let tryFindTypeMapping isLegacy =
 /// [System columns](https://www.postgresql.org/docs/current/ddl-system-columns.html),
 /// named one at a time. The provider DB type is required: Npgsql won't bind `uint32`
 /// without it.
-let systemColumns: (string * TypeMapping * SystemColumn) list =
+let systemColumns: (string * TypeMapping * ReadOnlyColumn) list =
     let mapping alias clrType dbType providerDbType =
         {
             TypeMapping.ColumnTypeAlias = alias
@@ -115,33 +115,39 @@ let systemColumns: (string * TypeMapping * SystemColumn) list =
     [
         "tableoid",
         mapping "oid" "uint" DbType.UInt32 (nameof NpgsqlDbType.Oid),
-        { Doc = [ "The OID of the table this row came from. Constant for a query against one table; it"
+        { ExcludedFromSelectStar = true
+          Doc = [ "The OID of the table this row came from. Constant for a query against one table; it"
                   "earns its keep when the query spans a partition or inheritance hierarchy." ] }
 
         "xmin",
         xid,
-        { Doc = [ "The id of the transaction that inserted this row version — PostgreSQL's row"
+        { ExcludedFromSelectStar = true
+          Doc = [ "The id of the transaction that inserted this row version — PostgreSQL's row"
                   "version. It changes on every write to the row, which is what makes it usable as"
                   "an optimistic-concurrency check: read it, then include it in the WHERE of the"
                   "UPDATE. If someone else wrote first the UPDATE matches no rows." ] }
 
         "cmin",
         cid,
-        { Doc = [ "The command id within the inserting transaction. Only meaningful inside that"
+        { ExcludedFromSelectStar = true
+          Doc = [ "The command id within the inserting transaction. Only meaningful inside that"
                   "transaction." ] }
 
         "xmax",
         xid,
-        { Doc = [ "The id of the transaction that deleted this row version, or 0 for a live row." ] }
+        { ExcludedFromSelectStar = true
+          Doc = [ "The id of the transaction that deleted this row version, or 0 for a live row." ] }
 
         "cmax",
         cid,
-        { Doc = [ "The command id within the deleting transaction. Only meaningful inside that"
+        { ExcludedFromSelectStar = true
+          Doc = [ "The command id within the deleting transaction. Only meaningful inside that"
                   "transaction." ] }
 
         "ctid",
         mapping "tid" "NpgsqlTypes.NpgsqlTid" DbType.Object (nameof NpgsqlDbType.Tid),
-        { Doc = [ "WARNING: not a row identifier. `ctid` is the physical location of this row"
+        { ExcludedFromSelectStar = true
+          Doc = [ "WARNING: not a row identifier. `ctid` is the physical location of this row"
                   "version, and it changes when the row is updated and when VACUUM FULL or CLUSTER"
                   "moves it. It is valid only for as long as you hold the row you read it from."
                   "Use the primary key for identity and `xmin` for versioning." ] }
@@ -157,13 +163,13 @@ let toSystemColumn (name: string) : Column =
     let normalized = name.ToLower().Trim()
 
     match systemColumns |> List.tryFind (fun (n, _, _) -> n = normalized) with
-    | Some(n, typeMapping, systemColumn) ->
+    | Some(n, typeMapping, readOnly) ->
         {
             Column.Name = n
             Column.IsNullable = false
             Column.IsPK = false
             Column.TypeMapping = typeMapping
-            Column.SystemColumn = Some systemColumn
+            Column.ReadOnly = Some readOnly
         }
     | None ->
         failwithf

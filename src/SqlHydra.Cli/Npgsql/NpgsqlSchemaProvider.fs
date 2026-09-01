@@ -10,6 +10,14 @@ open SqlHydra
 let isBaseTableType tableType =
     tableType <> "view" && tableType <> "materialized view"
 
+/// True for a column PostgreSQL writes itself, from its `pg_attribute` row: a generated
+/// column (`attgenerated` — 's' stored, 'v' virtual) or a `GENERATED ALWAYS AS IDENTITY`
+/// one (`attidentity` = 'a'). Both reject a write naming them. `attidentity` = 'd' —
+/// `BY DEFAULT` — is writable and must not be caught here.
+/// https://www.postgresql.org/docs/current/catalog-pg-attribute.html
+let isDatabaseGenerated (attgenerated: string) (attidentity: string) =
+    attgenerated <> "" || attidentity = "a"
+
 let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
     // Up front, so a misspelled entry fails before the first query.
     let configuredSystemColumns = cfg.SystemColumns |> List.map NpgsqlDataTypes.toSystemColumn
@@ -61,6 +69,43 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                 rdr.["COLUMN_NAME"] :?> string
         ]
         |> Set.ofList
+
+    let generatedColumns =
+        let sql =
+            """
+            SELECT
+                pg_namespace.nspname AS table_schema,
+                pg_class.relname AS table_name,
+                pg_attribute.attname AS column_name,
+                pg_attribute.attgenerated::text AS attgenerated,
+                pg_attribute.attidentity::text AS attidentity
+            FROM pg_attribute
+            INNER JOIN pg_class ON pg_class.oid = pg_attribute.attrelid
+            INNER JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+            WHERE
+                -- ordinary (r) and partitioned (p) tables; nothing else can be written
+                pg_class.relkind in ('r', 'p') AND
+                pg_attribute.attnum >= 1 AND
+                NOT pg_attribute.attisdropped AND
+                pg_namespace.nspname not in ('pg_catalog', 'information_schema');
+            """
+
+        use cmd = new Npgsql.NpgsqlCommand(sql, conn)
+        use rdr = cmd.ExecuteReader()
+        [
+            while rdr.Read() do
+                if isDatabaseGenerated (rdr["attgenerated"] :?> string) (rdr["attidentity"] :?> string) then
+                    rdr["TABLE_SCHEMA"] :?> string,
+                    rdr["TABLE_NAME"] :?> string,
+                    rdr["COLUMN_NAME"] :?> string
+        ]
+        |> Set.ofList
+
+    /// `Some` when the database owns the value, so it is never INSERTed or SET.
+    let readOnly (col: ColumnSchema) =
+        if generatedColumns.Contains(col.Schema, col.Table, col.Name)
+        then Some ReadOnlyColumn.Generated
+        else None
 
     let enums =
         let sql =
@@ -240,7 +285,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
-                            Column.SystemColumn = None
+                            Column.ReadOnly = None
                         }
                     )
                 )
@@ -300,7 +345,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
-                            Column.SystemColumn = None
+                            Column.ReadOnly = readOnly col
                         }
                     )
                 )
@@ -333,7 +378,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                                 TypeMapping.ProviderDbType = None
                             }
                         Column.IsPK = col.IsPrimaryKey
-                        Column.SystemColumn = None
+                        Column.ReadOnly = readOnly col
                     }
                 )
 
