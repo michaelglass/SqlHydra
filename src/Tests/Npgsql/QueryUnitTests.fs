@@ -1763,8 +1763,7 @@ let ``system column: whole-entity select appends every system column by name``()
 
 [<Test>]
 let ``system column: a joined select keeps each table's system column under its own alias``() =
-    // The mistake to avoid: appending to whatever projection came last, so that `o.*`
-    // gains a column belonging to `c`.
+    // `o.*` must not gain a column belonging to `c`.
     let sql =
         select {
             for c in SystemColumnFixture.currency do
@@ -1810,8 +1809,7 @@ let ``system column: entity update leaves them out of the SET clause``() =
 
 [<Test>]
 let ``system column: a where predicate treats it as an ordinary column``() =
-    // Nothing special happens here, and that is the point — the compare-and-swap guard
-    // needs no new operation, only a column that binds with the right provider type.
+    // The guard needs no new operation, just a column that binds.
     let sql =
         update {
             for c in SystemColumnFixture.currency do

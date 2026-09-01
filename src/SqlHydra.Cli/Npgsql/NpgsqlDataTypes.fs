@@ -98,11 +98,8 @@ let tryFindTypeMapping isLegacy =
         map.TryFind (ctx.Column.ProviderTypeName.ToLower().Trim())
 
 /// [System columns](https://www.postgresql.org/docs/current/ddl-system-columns.html),
-/// opt-in one at a time via `system_columns = ["xmin"]`. No wildcard: it would only make
-/// it easy to acquire `ctid` unintentionally.
-///
-/// The provider DB type is required, not decoration: Npgsql has no default mapping for
-/// `uint32`, so `where (u.xmin = expected)` throws without it. Reads need none of it.
+/// named one at a time. The provider DB type is required: Npgsql won't bind `uint32`
+/// without it.
 let systemColumns: (string * TypeMapping * SystemColumn) list =
     let mapping alias clrType dbType providerDbType =
         {

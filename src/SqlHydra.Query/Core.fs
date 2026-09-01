@@ -263,9 +263,7 @@ module internal QueryUtils =
                 failwith "Either an `entity`, `set`, or `setRaw` operation must be present in an `update` expression."
             | None, setValues -> setValues
 
-        // The database owns a system column's value, so it can never appear in a SET
-        // clause. Filtering here rather than at the call site is what lets `entity row`
-        // keep working on a record that carries one.
+        // Never in a SET clause; filtered here so `entity row` still works.
         let kvps = kvps |> List.filter (fun (col, _) -> not (systemColumns.Contains col))
 
         {
@@ -289,8 +287,7 @@ module internal QueryUtils =
                 let included = fields |> Set.ofList
                 FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
                 |> Array.filter (fun p -> included.Contains(p.Name))
-            // Same as the SET clause above: never INSERTed, so a record that carries one
-            // can still be inserted whole.
+            // Never INSERTed, for the same reason.
             |> Array.filter (fun p -> not (systemColumns.Contains p.Name))
 
         let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList

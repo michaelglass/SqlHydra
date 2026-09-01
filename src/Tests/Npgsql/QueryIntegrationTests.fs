@@ -854,8 +854,7 @@ module SystemColumnFixture =
             select c
         }
 
-    /// INSERT succeeds only because the system columns are filtered out of the column
-    /// list; PostgreSQL rejects a write that names one.
+    /// PostgreSQL rejects a write naming one, so this only succeeds because they are filtered.
     let insert ctx code name =
         insertTask ctx {
             for c in currency do
@@ -872,13 +871,13 @@ let ``system columns: all six hydrate on a whole-entity read``() = task {
     let! rows = SystemColumnFixture.read ctx "SC1"
     let row = rows |> Seq.exactlyOne
 
-    // The table's own OID. Real, and the same for every row of the table.
+    // Same for every row of the table.
     row.tableoid >! 0u
     // The inserting transaction: the row version.
     row.xmin >! 0u
     // A live row has not been deleted, so xmax is 0.
     row.xmax =! 0u
-    // Command ids within their transactions. A single-statement INSERT is command 0.
+    // A single-statement INSERT is command 0.
     row.cmin =! 0u
     row.cmax =! 0u
     // A physical address: (block, offset). Offsets are 1-based, so a real one is never 0.

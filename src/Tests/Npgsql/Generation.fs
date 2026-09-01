@@ -204,16 +204,14 @@ let ``All six system columns can be generated at once``() =
 
 [<Test>]
 let ``ctid is generated with the caution that it is not a row identifier``() =
-    // The person who names `ctid` in the config is not the person who, months later,
-    // reads `row.ctid` and takes it for an id. A doc comment is what reaches the second
-    // one.
+    // The config's reader and `row.ctid`'s reader are different people.
     let code = generateWith [ "ctid" ]
     code.Contains("/// WARNING: not a row identifier.") =! true
     code.Contains("VACUUM FULL") =! true
 
 [<Test>]
 let ``A misspelled system column fails generation, naming the six that exist``() =
-    // Silently generating nothing for a typo is the failure mode this exists to avoid.
+    // A typo must fail, not silently generate nothing.
     let ex = Assert.Throws<System.Exception>(fun () -> NpgsqlDataTypes.toSystemColumn "xmim" |> ignore)
     ex.Message.Contains("'xmim'") =! true
     ex.Message.Contains("tableoid, xmin, cmin, xmax, cmax, ctid") =! true
