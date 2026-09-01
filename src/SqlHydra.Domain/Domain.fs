@@ -48,6 +48,13 @@ type Column =
         TypeMapping: TypeMapping
         IsNullable: bool
         IsPK: bool
+
+        /// Doc-comment lines emitted above the generated field, one `///` line each.
+        ///
+        /// A caution that lives only in an extension's README reaches whoever configured
+        /// the extension and nobody else. This puts it on the field, where the person
+        /// reaching for the column is looking.
+        Doc: string list
     }
 
 type TableType = 

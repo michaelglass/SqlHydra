@@ -95,6 +95,10 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
                     | _ ->
                         None
 
+                // Before the attributes, so the doc comment binds to the field.
+                for line in col.Doc do
+                    $"/// {line}"
+
                 if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value
                 let colName = columnName { NamingContext.Table = table; Column = Some col }
                 $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks colName}: {columnPropertyType}"""
