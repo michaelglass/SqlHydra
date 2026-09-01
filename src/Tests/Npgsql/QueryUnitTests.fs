@@ -1830,3 +1830,60 @@ let ``read-only column: a table without one is unaffected``() =
         }
         |> toInsertSql
     sql =! """INSERT INTO "sales"."currency" ("currencycode", "name", "modifieddate") VALUES (@p0, @p1, @p2)"""
+
+// Fixture standing in for a view no write can reach — an aggregate view, say — where the
+// generator marks every column read-only and the filter is left with nothing to write.
+
+module EveryColumnReadOnlyFixture =
+    module sales =
+        [<CLIMutable>]
+        type totals =
+            { [<SqlHydra.ReadOnlyColumn>]
+              row_count: int64
+              [<SqlHydra.ReadOnlyColumn>]
+              total: decimal }
+
+    let totals = table<sales.totals>
+
+    let sampleRow : sales.totals = { row_count = 0L; total = 0m }
+
+[<Test>]
+let ``every column read-only: insert refuses rather than name no columns``() =
+    // `INSERT INTO "sales"."totals" () VALUES ()` is a PostgreSQL syntax error pointing at
+    // nothing the caller wrote.
+    let build () =
+        insert {
+            into EveryColumnReadOnlyFixture.totals
+            entity EveryColumnReadOnlyFixture.sampleRow
+        }
+        |> toInsertSql
+        |> ignore
+    let ex = Assert.Throws<Exception>(fun () -> build ())
+    test <@ ex.Message.Contains("sales.totals") && ex.Message.Contains("read-only") @>
+
+[<Test>]
+let ``every column read-only: update refuses rather than set nothing``() =
+    // `UPDATE "sales"."totals" SET  WHERE ...` is the same syntax error one statement over.
+    let build () =
+        update {
+            for t in EveryColumnReadOnlyFixture.totals do
+            entity EveryColumnReadOnlyFixture.sampleRow
+            where (t.row_count = 1L)
+        }
+        |> toUpdateSql
+        |> ignore
+    let ex = Assert.Throws<Exception>(fun () -> build ())
+    test <@ ex.Message.Contains("sales.totals") && ex.Message.Contains("read-only") @>
+
+[<Test>]
+let ``every column read-only: setRaw still reaches the statement``() =
+    // SqlHydra refuses a statement that writes nothing, not one that names a read-only
+    // column: `setRaw` reaches the database, which then decides for itself.
+    let sql =
+        update {
+            for t in EveryColumnReadOnlyFixture.totals do
+            setRaw t.total "DEFAULT"
+            where (t.row_count = 1L)
+        }
+        |> toUpdateSql
+    sql.Contains("\"total\" = DEFAULT") =! true

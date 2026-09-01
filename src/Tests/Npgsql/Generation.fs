@@ -299,3 +299,99 @@ let ``A generated column marks its own table and schema, not a same-named column
         isReadOnly "person" "sqlhydra_generated_probe" "tax" =! false
     finally
         execute dropCrossTableProbes
+
+// A column of a view that cannot carry a write is the second thing that makes a column
+// read-only, and it has nothing to do with generation.
+
+[<TestCase(false, false, true, Description = "an expression or aggregate column of a plain view")>]
+[<TestCase(true, false, false, Description = "a column an auto-updatable view passes straight through")>]
+[<TestCase(false, true, false, Description = "an INSTEAD OF trigger takes the whole row, column answer or not")>]
+[<TestCase(true, true, false, Description = "writable twice over")>]
+let ``A view column is read-only only when nothing can carry a write to it`` columnIsUpdatable insteadOfTriggerWrites expected =
+    let updatability : NpgsqlSchemaProvider.PgUpdatability =
+        { ColumnIsUpdatable = columnIsUpdatable; InsteadOfTriggerWrites = insteadOfTriggerWrites }
+    NpgsqlSchemaProvider.isViewColumnUnwritable updatability =! expected
+
+let private viewProbeDdl =
+    """
+    DROP VIEW IF EXISTS sales.sqlhydra_trigger_view_probe CASCADE;
+    DROP VIEW IF EXISTS sales.sqlhydra_aggregate_view_probe CASCADE;
+    DROP VIEW IF EXISTS sales.sqlhydra_expression_view_probe CASCADE;
+    DROP TABLE IF EXISTS sales.sqlhydra_view_base_probe CASCADE;
+    DROP FUNCTION IF EXISTS sales.sqlhydra_view_probe_fn() CASCADE;
+
+    CREATE TABLE sales.sqlhydra_view_base_probe (price numeric NOT NULL);
+
+    -- auto-updatable but for the one column that is an expression
+    CREATE VIEW sales.sqlhydra_expression_view_probe AS
+        SELECT price, price * 2 AS doubled FROM sales.sqlhydra_view_base_probe;
+
+    -- not auto-updatable in any column
+    CREATE VIEW sales.sqlhydra_aggregate_view_probe AS
+        SELECT count(*) AS row_count, sum(price) AS total FROM sales.sqlhydra_view_base_probe;
+
+    -- the same shape, made writable again by INSTEAD OF triggers
+    CREATE VIEW sales.sqlhydra_trigger_view_probe AS
+        SELECT count(*) AS row_count, sum(price) AS total FROM sales.sqlhydra_view_base_probe;
+    CREATE FUNCTION sales.sqlhydra_view_probe_fn() RETURNS trigger LANGUAGE plpgsql AS
+        $$ BEGIN RETURN NEW; END; $$;
+    CREATE TRIGGER sqlhydra_view_probe_insert INSTEAD OF INSERT ON sales.sqlhydra_trigger_view_probe
+        FOR EACH ROW EXECUTE FUNCTION sales.sqlhydra_view_probe_fn();
+    CREATE TRIGGER sqlhydra_view_probe_update INSTEAD OF UPDATE ON sales.sqlhydra_trigger_view_probe
+        FOR EACH ROW EXECUTE FUNCTION sales.sqlhydra_view_probe_fn();
+    """
+
+let private dropViewProbes =
+    "DROP VIEW IF EXISTS sales.sqlhydra_trigger_view_probe CASCADE;
+     DROP VIEW IF EXISTS sales.sqlhydra_aggregate_view_probe CASCADE;
+     DROP VIEW IF EXISTS sales.sqlhydra_expression_view_probe CASCADE;
+     DROP TABLE IF EXISTS sales.sqlhydra_view_base_probe CASCADE;
+     DROP FUNCTION IF EXISTS sales.sqlhydra_view_probe_fn() CASCADE;"
+
+/// Read-only, by view name and column name. A swapped argument makes `List.find` throw,
+/// so a mixed-up probe fails loudly rather than asserting against the wrong view.
+let private readOnlyViewColumns () =
+    let cfg =
+        { baseCfg with
+            ConnectionString = DB.connectionString
+            Filters =
+                { Filters.Empty with
+                    Includes =
+                        [ "sales/sqlhydra_expression_view_probe"
+                          "sales/sqlhydra_aggregate_view_probe"
+                          "sales/sqlhydra_trigger_view_probe" ] } }
+
+    let tables = (NpgsqlSchemaProvider.getSchema(cfg, false, [])).Tables
+
+    fun view column ->
+        tables
+        |> List.find (fun tbl -> tbl.Name = view)
+        |> fun tbl -> (tbl.Columns |> List.find (fun col -> col.Name = column)).IsReadOnly
+
+[<Test>]
+let ``A view column no write can reach is read-only, and its neighbours are not``() =
+    execute viewProbeDdl
+
+    try
+        let isReadOnly = readOnlyViewColumns ()
+        isReadOnly "sqlhydra_expression_view_probe" "doubled" =! true
+        isReadOnly "sqlhydra_expression_view_probe" "price" =! false
+    finally
+        execute dropViewProbes
+
+[<Test>]
+let ``An INSTEAD OF trigger keeps every column of its view writable``() =
+    // The trigger is handed the whole row, so it is the one thing that makes a view of this
+    // shape writable. Marking these read-only drops both columns from the INSERT the trigger
+    // exists to receive.
+    execute viewProbeDdl
+
+    try
+        let isReadOnly = readOnlyViewColumns ()
+        isReadOnly "sqlhydra_trigger_view_probe" "row_count" =! false
+        isReadOnly "sqlhydra_trigger_view_probe" "total" =! false
+        // The same shape without the triggers: nothing can carry the write.
+        isReadOnly "sqlhydra_aggregate_view_probe" "row_count" =! true
+        isReadOnly "sqlhydra_aggregate_view_probe" "total" =! true
+    finally
+        execute dropViewProbes

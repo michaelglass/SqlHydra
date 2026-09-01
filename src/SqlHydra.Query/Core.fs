@@ -233,6 +233,21 @@ module internal QueryUtils =
                 |> Set.ofArray
             else Set.empty))
 
+    /// Raised when the read-only filter has left a statement with nothing to write, which
+    /// happens once every column of a relation is read-only — a view no write can reach.
+    /// The emitted SQL would be `INSERT INTO t () VALUES ()` or `UPDATE t SET  WHERE ...`,
+    /// which PostgreSQL answers with a syntax error pointing at nothing the caller wrote.
+    ///
+    /// A table whose every column is generated is the one case this refuses too eagerly:
+    /// `INSERT INTO t DEFAULT VALUES` writes a real row there. Telling the two apart needs
+    /// the reason a column is read-only, which the `[<ReadOnlyColumn>]` attribute does not carry.
+    let private failWritesNothing (statement: string) (table: string) (readOnlyColumns: Set<string>) =
+        failwithf
+            "Cannot %s '%s': every column is read-only (%s), so the statement would name none and write nothing. Read from it instead, or write to the relation underneath it."
+            statement
+            table
+            (readOnlyColumns |> Set.toList |> String.concat ", ")
+
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
         let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
 
@@ -264,6 +279,9 @@ module internal QueryUtils =
                         col
                 | None -> setValues
 
+        if kvps.IsEmpty && spec.RawSetValues.IsEmpty then
+            failWritesNothing "update" spec.Table readOnlyColumns
+
         {
             Table = spec.Table
             SetColumns = kvps
@@ -288,6 +306,9 @@ module internal QueryUtils =
             |> Array.filter (fun p -> not (readOnlyColumns.Contains p.Name))
 
         let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
+
+        if columns.IsEmpty then
+            failWritesNothing "insert into" spec.Table readOnlyColumns
 
         match spec.FromSelect, spec.Entities with
         | Some selectIR, _ ->
