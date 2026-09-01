@@ -1778,6 +1778,20 @@ let ``read-only column: a where predicate treats it as an ordinary column``() =
     sql =! "SELECT \"i\".* FROM \"sales\".\"invoice\" AS \"i\" WHERE (\"i\".\"id\" = @p0)"
 
 [<Test>]
+let ``read-only column: an explicit set on one fails, naming it and the way out``() =
+    // 4.1.1 let this reach PostgreSQL, which refused it.
+    let build () =
+        update {
+            for i in ReadOnlyColumnFixture.invoice do
+            set i.tax 99m
+            where (i.currencycode = "BTC")
+        }
+        |> toUpdateSql
+        |> ignore
+    let ex = Assert.Throws<Exception>(fun () -> build ())
+    test <@ ex.Message.Contains("'tax'") && ex.Message.Contains("setRaw") @>
+
+[<Test>]
 let ``read-only column: setRaw is left alone, so DEFAULT stays reachable``() =
     // The one value PostgreSQL accepts for a generated column.
     let sql =

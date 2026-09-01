@@ -256,7 +256,13 @@ module internal QueryUtils =
             | Some _, _ -> failwith "Cannot have both `entity` and `set` operations in an `update` expression."
             | None, [] when spec.RawSetValues.IsEmpty ->
                 failwith "Either an `entity`, `set`, or `setRaw` operation must be present in an `update` expression."
-            | None, setValues -> setValues
+            | None, setValues ->
+                match setValues |> List.tryFind (fun (col, _) -> readOnlyColumns.Contains col) with
+                | Some (col, _) ->
+                    failwithf
+                        "Cannot `set` read-only column '%s': the database generates its value and rejects an UPDATE that names it. Remove the `set` — an `entity` update skips read-only columns for you — or `setRaw` it to DEFAULT, the one value the database accepts."
+                        col
+                | None -> setValues
 
         {
             Table = spec.Table
