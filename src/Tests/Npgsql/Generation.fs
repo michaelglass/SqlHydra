@@ -8,9 +8,7 @@ open VerifyTests
 open VerifyNUnit
 open SqlHydra.Npgsql
 
-// ==========================================
 // Base table vs. view.
-// ==========================================
 
 [<TestCase("BASE TABLE", true)>]
 [<TestCase("table", true)>]
@@ -126,10 +124,7 @@ let ``Npgsql table types distinguish base tables from appended views`` tableType
 //    cfg |> inCode "[<ProviderDbType(\"Jsonb\")>]"
 
 
-// ==========================================
-// Read-only system column code generation.
-// DB-free: drives SchemaTemplate.generate directly with a synthetic schema.
-// ==========================================
+// System column generation. DB-free: drives SchemaTemplate.generate with a synthetic schema.
 
 let private systemColumnCfg systemColumns : Config =
     {
@@ -189,10 +184,7 @@ let ``A system column is generated with the SystemColumn attribute``() =
 let ``An ordinary table generates no SystemColumn attribute``() =
     generateWith([]).Contains("[<SystemColumn>]") =! false
 
-// The CLR type and provider DB type for each of the six, as verified against a live
-// PostgreSQL: reading gives uint32 for the five id columns and NpgsqlTid for ctid, and
-// the provider DB type is what lets a value of that type be bound as a parameter at all
-// (Npgsql has no default mapping for uint32).
+// CLR and provider DB types, verified against a live PostgreSQL.
 [<TestCase("tableoid", "tableoid: uint", "Oid")>]
 [<TestCase("xmin", "xmin: uint", "Xid")>]
 [<TestCase("cmin", "cmin: uint", "Cid")>]

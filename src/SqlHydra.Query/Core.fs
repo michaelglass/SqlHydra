@@ -223,10 +223,7 @@ module internal QueryUtils =
     let internal isSystemColumnProp (p: MemberInfo) =
         Attribute.IsDefined(p, typeof<SqlHydra.SystemColumnAttribute>, false)
 
-    /// The names of the `[<SystemColumn>]` fields on record type `t` (Option/Nullable
-    /// unwrapped), empty for anything that is not a record. Drives both halves of the
-    /// treatment: appended by name to a whole-entity SELECT, and kept out of every INSERT
-    /// column list and UPDATE SET clause.
+    /// `[<SystemColumn>]` field names on `t` (Option/Nullable unwrapped); empty if not a record.
     let internal getSystemColumnNames (t: Type) : Set<string> =
         let recordType =
             if t.IsGenericType

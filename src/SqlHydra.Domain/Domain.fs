@@ -42,17 +42,11 @@ type TypeMapping =
     member this.IsValueType() = 
         isValueType this.ClrType
 
-/// A read-only, database-managed *system column* — PostgreSQL's `xmin`, `ctid` and the
-/// rest. They are excluded by `SELECT *`, so a generated field can only be filled by
-/// naming the column, and the database owns the value, so it can never be written.
-/// The generator emits such a column with a `[<SystemColumn>]` attribute; SqlHydra.Query
-/// then appends it to a whole-entity SELECT by name and drops it from every INSERT
-/// column list and UPDATE SET clause.
+/// A read-only [system column](https://www.postgresql.org/docs/current/ddl-system-columns.html):
+/// excluded by `SELECT *`, never written.
 type SystemColumn =
     {
-        /// Doc-comment lines emitted above the generated field, so that a caution — that
-        /// `ctid` is a physical address and not a row identifier, say — reaches every use
-        /// site rather than only whoever read the README.
+        /// Doc lines emitted above the generated field, so a caution reaches the use site.
         Doc: string list
     }
 
@@ -147,9 +141,7 @@ type Config =
         /// SqlHydra.Query Integration: creates a SqlHydra.Query table declaration for each table
         TableDeclarations: bool
 
-        /// Read-only system columns to generate on each table, in addition to its ordinary
-        /// columns. PostgreSQL only, and named one at a time — `[ "xmin" ]` to make the row
-        /// version available for optimistic concurrency. Default: empty.
+        /// System columns to generate, named one at a time, e.g. `[ "xmin" ]`. PostgreSQL only.
         SystemColumns: string list
 
         /// Readers: provides a Db provider specific IDataReader type (for access to Db-specific features)

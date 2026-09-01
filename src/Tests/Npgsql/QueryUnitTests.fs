@@ -1722,11 +1722,7 @@ let ``two ordinary .NET calls in a where are evaluated, not rendered``() =
     let ex = Assert.Throws<NotImplementedException>(fun () -> build ())
     test <@ ex.Message.Contains("Value to value") @>
 
-// ==========================================
-// Read-only system columns ([<SystemColumn>]).
-// A hand-written fixture standing in for what the generator emits for
-// `system_columns = ["xmin", "ctid"]` on the real `sales.currency` table.
-// ==========================================
+// System columns. Hand-written fixture standing in for generated output.
 
 module SystemColumnFixture =
     module sales =

@@ -4,21 +4,14 @@ open System.Data
 open SqlHydra.Domain
 open SqlHydra
 
-/// True for an ordinary base table, false for a view.
-///
-/// Npgsql's `GetSchema("Tables")` reports TABLE_TYPE straight from
-/// `information_schema.tables`, so a plain table arrives as the SQL-standard
-/// "BASE TABLE" — never the literal "table" this used to test for, which meant every
-/// PostgreSQL table was typed as a view. The `views` and `materialized views` rows
-/// appended further down carry our own "view" / "materialized view" labels instead, so
-/// testing by exclusion keeps this right regardless of how a future Npgsql spells the
-/// base-table case.
+/// True for a base table, false for a view. Npgsql reports TABLE_TYPE from
+/// `information_schema.tables`, so a table arrives as "BASE TABLE" — not the literal
+/// "table" this used to test for, which typed every PostgreSQL table as a view.
 let isBaseTableType tableType =
     tableType <> "view" && tableType <> "materialized view"
 
 let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
-    // Resolved once, up front: a misspelled `system_columns` entry should fail before the
-    // first query, not silently generate a table without the column that was asked for.
+    // Up front, so a misspelled entry fails before the first query.
     let configuredSystemColumns = cfg.SystemColumns |> List.map NpgsqlDataTypes.toSystemColumn
 
     use conn = new Npgsql.NpgsqlConnection(cfg.ConnectionString)
@@ -351,9 +344,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                 |> SchemaFilters.filterColumns cfg.Filters tbl.Schema tbl.Name
                 |> Seq.toList
 
-            // System columns come from `information_schema` no more than `SELECT *` returns
-            // them, so they are appended here rather than discovered. Views do not have
-            // them: a view row has no physical tuple behind it.
+            // Not in `information_schema`, so appended rather than discovered. Views have none.
             let systemColumns = if isBaseTable then configuredSystemColumns else []
 
             if filteredColumns |> Seq.isEmpty then

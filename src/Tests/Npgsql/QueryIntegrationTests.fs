@@ -795,17 +795,8 @@ let ``SqlFn - PostgreSQL functions smoke test``() = task {
     Assert.That(middleName, Is.Not.Null)
 }
 
-// ==========================================
-// Read-only system columns, end to end against a live PostgreSQL row.
-// A hand-written fixture standing in for what the generator emits for
-// `system_columns = ["tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"]` on the real
-// `sales.currency` table.
-//
-// These assert the round trip, not the emitted SQL: that PostgreSQL returns the columns,
-// that they hydrate into the record, and that a compare-and-swap on the row version
-// actually refuses a stale write. A test that only checks the SQL string proves the
-// string, and the string was never the risky part.
-// ==========================================
+// System columns end to end. Hand-written fixture standing in for generated output.
+// These assert the round trip, not the emitted SQL.
 
 module SystemColumnFixture =
     module sales =

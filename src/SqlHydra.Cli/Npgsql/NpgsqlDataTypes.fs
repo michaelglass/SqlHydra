@@ -97,20 +97,12 @@ let tryFindTypeMapping isLegacy =
     fun (ctx: TypeMappingContext) ->
         map.TryFind (ctx.Column.ProviderTypeName.ToLower().Trim())
 
-/// PostgreSQL's read-only *system columns*. Every table has all six of them, none is
-/// returned by `SELECT *`, and none can be written — the database owns the value.
-/// https://www.postgresql.org/docs/current/ddl-system-columns.html
+/// [System columns](https://www.postgresql.org/docs/current/ddl-system-columns.html),
+/// opt-in one at a time via `system_columns = ["xmin"]`. No wildcard: it would only make
+/// it easy to acquire `ctid` unintentionally.
 ///
-/// Opt in one column at a time through `Config.SystemColumns`
-/// (`system_columns = ["xmin"]`). There is deliberately no wildcard: everything a
-/// wildcard would save is one column name, and the one thing it would buy is a way to
-/// acquire `ctid` without meaning to.
-///
-/// Each maps to the CLR type Npgsql reads the column as, plus the provider DB type that
-/// binds a value of that type as a parameter. The provider DB type is not decoration:
-/// Npgsql has no default mapping for `uint32`, so `where (u.xmin = expected)` throws
-/// without it ("Writing values of 'System.UInt32' is not supported for parameters having
-/// no NpgsqlDbType"). Reading needs none of it.
+/// The provider DB type is required, not decoration: Npgsql has no default mapping for
+/// `uint32`, so `where (u.xmin = expected)` throws without it. Reads need none of it.
 let systemColumns: (string * TypeMapping * SystemColumn) list =
     let mapping alias clrType dbType providerDbType =
         {
