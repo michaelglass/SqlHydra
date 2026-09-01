@@ -1917,3 +1917,55 @@ let ``read-only column: setRaw is left alone, so DEFAULT stays reachable``() =
         }
         |> toUpdateSql
     sql.Contains("\"tax\" = DEFAULT") =! true
+
+[<Test>]
+let ``system column: distinct before select fails rather than dedupe on a row version``() =
+    // `SELECT DISTINCT "c".*, "c"."xmin"` dedupes on xmin too, so two duplicate rows
+    // written in separate transactions come back as two. Verified against PostgreSQL 18.
+    let build () =
+        select {
+            for c in SystemColumnFixture.currency do
+            distinct
+            select c
+        }
+        |> toSql
+        |> ignore
+    let ex = Assert.Throws<Exception>(fun () -> build ())
+    test <@ ex.Message.Contains("distinct") && ex.Message.Contains("'c.xmin'") @>
+
+[<Test>]
+let ``system column: distinct after select fails too``() =
+    // Either CE order reaches the same projection, so both operations check.
+    let build () =
+        select {
+            for c in SystemColumnFixture.currency do
+            select c
+            distinct
+        }
+        |> toSql
+        |> ignore
+    Assert.Throws<Exception>(fun () -> build ()) |> ignore
+
+[<Test>]
+let ``system column: distinct on named columns is unaffected``() =
+    // Nothing is appended, so nothing changes the dedupe key.
+    let sql =
+        select {
+            for c in SystemColumnFixture.currency do
+            distinct
+            select (c.currencycode, c.name)
+        }
+        |> toSql
+    sql =! "SELECT DISTINCT \"c\".\"currencycode\", \"c\".\"name\" FROM \"sales\".\"currency\" AS \"c\""
+
+[<Test>]
+let ``read-only column: distinct on a whole-entity select is unaffected``() =
+    // A generated column is in `SELECT *` already; nothing is appended, nothing changes.
+    let sql =
+        select {
+            for i in ReadOnlyColumnFixture.invoice do
+            distinct
+            select i
+        }
+        |> toSql
+    sql =! "SELECT DISTINCT \"i\".* FROM \"sales\".\"invoice\" AS \"i\""

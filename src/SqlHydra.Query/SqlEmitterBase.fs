@@ -294,7 +294,7 @@ type SqlEmitterBase() =
                 |> List.map (fun col ->
                     match col with
                     | AllColumns alias -> $"{this.QuoteIdentifier(alias)}.*"
-                    | SpecificColumn name -> this.QuoteColumn(name)
+                    | SpecificColumn name | ImplicitColumn name -> this.QuoteColumn(name)
                     | RawColumn (fragment, parms) ->
                         this.SubstituteParams(this.QuoteRawFragment(fragment), parms, collector)
                 )

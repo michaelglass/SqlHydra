@@ -108,6 +108,20 @@ module ResultModifier =
 
     type Head<'T>(qs) = inherit ModifierBase<'T>(qs)
 
+/// `SELECT DISTINCT` dedupes on the whole projection, so a system column appended to a
+/// whole-entity `select` silently turns a dedupe into a non-dedupe: `xmin` differs per row
+/// version, so duplicate rows written in separate transactions stop collapsing. There is no
+/// right answer to emit either — of two duplicates, whose version would the survivor carry? —
+/// so this fails instead. `distinctOn` is unaffected: its key is the columns you name.
+let internal checkDistinctProjection (ir: SelectQueryIR) =
+    if ir.Distinct then
+        match ir.Select |> List.choose (function ImplicitColumn name -> Some name | _ -> None) with
+        | [] -> ()
+        | names ->
+            failwithf
+                "`distinct` would dedupe on %s, system columns a whole-entity `select` adds for you — rows differing only by version would stop collapsing. Select the columns you mean to dedupe on, or use `distinctOn`."
+                (names |> List.map (sprintf "'%s'") |> String.concat ", ")
+
 /// The base select builder that contains all common operations
 type SelectBuilder<'Selected, 'Mapped> () =
 
@@ -210,7 +224,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     let systemColumns =
                         QueryUtils.getSystemColumnNames tableType
                         |> Set.toList
-                        |> List.map (fun name -> SpecificColumn $"%s{tableAlias}.%s{name}")
+                        |> List.map (fun name -> ImplicitColumn $"%s{tableAlias}.%s{name}")
                     { ir with Select = ir.Select @ [AllColumns tableAlias] @ systemColumns }
 
                 | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
@@ -230,6 +244,7 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     failwith "SelectedAs may only wrap SelectedColumn / SelectedExpression / SelectedExpressionWithParams"
             ) state.Query
 
+        checkDistinctProjection irWithSelectedColumns
         QuerySource<'Selected, SelectQueryIR>(irWithSelectedColumns, state.TableMappings)
 
     /// Sets the ORDER BY for single column
@@ -558,7 +573,10 @@ type SelectBuilder<'Selected, 'Mapped> () =
     /// Sets query to return DISTINCT values
     [<CustomOperation("distinct", MaintainsVariableSpace = true)>]
     member this.Distinct (state: QuerySource<'T, SelectQueryIR>) =
-        QuerySource<'T, SelectQueryIR>({ state.Query with Distinct = true }, state.TableMappings)
+        // Checked on both operations, since `distinct` may come before or after `select`.
+        let ir = { state.Query with Distinct = true }
+        checkDistinctProjection ir
+        QuerySource<'T, SelectQueryIR>(ir, state.TableMappings)
 
     /// Sets a CancellationToken for the query execution.
     [<CustomOperation("cancel", MaintainsVariableSpace = true)>]

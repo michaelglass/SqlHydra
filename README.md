@@ -928,6 +928,13 @@ is updated and when `VACUUM FULL` or `CLUSTER` moves it. Use the primary key for
 and `xmin` for versioning. It is generated with that warning as a doc comment, so it
 reaches the reader rather than only whoever wrote the config.
 
+**`distinct` and a whole-entity `select` do not combine** on a table with a system column,
+and fail at query construction rather than run. `SELECT DISTINCT "c".*, "c"."xmin"` dedupes
+on the row version too, so two duplicate rows written in separate transactions stop
+collapsing — and there is no right answer to emit instead, since a surviving row would have
+to carry one of the duplicates' versions. Project the columns you mean to dedupe on, or use
+`distinctOn`, whose key is the columns you name.
+
 Generation fails, rather than quietly emitting nothing, on a column that is not one of the
 six and on a table pattern that matches nothing. `system_columns` is PostgreSQL-only;
 other providers ignore it.

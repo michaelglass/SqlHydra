@@ -61,6 +61,10 @@ type SelectColumn =
     /// Raw SQL expression, optionally with `?` placeholders bound to `parameters` in order.
     /// Pass `[||]` when there are no parameters (e.g. `COUNT(*)`).
     | RawColumn of fragment: string * parameters: obj[]
+    /// A column added because the row type declares it, not because the caller named it:
+    /// a `[<SystemColumn>]` field, which `alias.*` does not return. Emitted exactly like
+    /// `SpecificColumn`; kept distinct so `distinct` can refuse to dedupe on one.
+    | ImplicitColumn of qualifiedName: string
 
 // ─── Mutually recursive types ───
 // SqlValue, WhereClause, JoinClause, and SelectQueryIR reference each other.
