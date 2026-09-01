@@ -284,3 +284,18 @@ let ``An explicit set of a read-only column is dropped`` () =
                 .Spec
 
     test <@ ir.SetColumns |> List.map fst = [ "name" ] @>
+
+// ---------------------------------------------------------------------------------------
+// `Table.Type`, which the seam puts in front of extensions
+// ---------------------------------------------------------------------------------------
+
+[<Test>]
+let ``A PostgreSQL base table is reported as a table, not a view`` () =
+    // `GetSchema("Tables")` reports `information_schema.tables.TABLE_TYPE`, so a table arrives
+    // as "BASE TABLE". Comparing against the literal "table" typed every PostgreSQL table as a
+    // view -- invisible until something reads Table.Type, which an extension deciding where a
+    // system column belongs does on every table.
+    test <@ SqlHydra.Npgsql.NpgsqlSchemaProvider.isBaseTableType "BASE TABLE" @>
+    test <@ SqlHydra.Npgsql.NpgsqlSchemaProvider.isBaseTableType "FOREIGN TABLE" @>
+    test <@ not (SqlHydra.Npgsql.NpgsqlSchemaProvider.isBaseTableType "view") @>
+    test <@ not (SqlHydra.Npgsql.NpgsqlSchemaProvider.isBaseTableType "materialized view") @>
