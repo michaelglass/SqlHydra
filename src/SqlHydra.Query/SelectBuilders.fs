@@ -205,7 +205,17 @@ type SelectBuilder<'Selected, 'Mapped> () =
                     // Bug fix: temporarily revert to * until option types are properly implemented.
                     // `tableType` was not properly unwrapping option types, causing a runtime error.
                     // For example, left joining a table creates an option type, which should be unwrapped.
-                    { ir with Select = ir.Select @ [AllColumns tableAlias] }
+                    //
+                    // `alias.*` excludes a system column, so any the row declares are appended
+                    // by name — this is what lets a whole-entity read hydrate a
+                    // `[<SystemColumn>]` field at all. They are appended under THIS table's
+                    // alias, from THIS table's type, so a join does not hang one table's
+                    // system column off another's. A row with none appends nothing.
+                    let systemColumns =
+                        QueryUtils.getSystemColumnNames tableType
+                        |> Set.toList
+                        |> List.map (fun name -> SpecificColumn $"%s{tableAlias}.%s{name}")
+                    { ir with Select = ir.Select @ [AllColumns tableAlias] @ systemColumns }
 
                 | LinqExpressionVisitors.SelectedColumn (tableAlias, column, _, _, _) ->
                     // Select a single column

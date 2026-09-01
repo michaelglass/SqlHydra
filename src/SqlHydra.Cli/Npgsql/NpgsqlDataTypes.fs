@@ -96,3 +96,88 @@ let tryFindTypeMapping isLegacy =
     let map = typeMappingsByName isLegacy
     fun (ctx: TypeMappingContext) ->
         map.TryFind (ctx.Column.ProviderTypeName.ToLower().Trim())
+
+/// PostgreSQL's read-only *system columns*. Every table has all six of them, none is
+/// returned by `SELECT *`, and none can be written — the database owns the value.
+/// https://www.postgresql.org/docs/current/ddl-system-columns.html
+///
+/// Opt in one column at a time through `Config.SystemColumns`
+/// (`system_columns = ["xmin"]`). There is deliberately no wildcard: everything a
+/// wildcard would save is one column name, and the one thing it would buy is a way to
+/// acquire `ctid` without meaning to.
+///
+/// Each maps to the CLR type Npgsql reads the column as, plus the provider DB type that
+/// binds a value of that type as a parameter. The provider DB type is not decoration:
+/// Npgsql has no default mapping for `uint32`, so `where (u.xmin = expected)` throws
+/// without it ("Writing values of 'System.UInt32' is not supported for parameters having
+/// no NpgsqlDbType"). Reading needs none of it.
+let systemColumns: (string * TypeMapping * SystemColumn) list =
+    let mapping alias clrType dbType providerDbType =
+        {
+            TypeMapping.ColumnTypeAlias = alias
+            TypeMapping.ClrType = clrType
+            TypeMapping.DbType = dbType
+            TypeMapping.ProviderDbType = Some providerDbType
+        }
+
+    let xid = mapping "xid" "uint" DbType.UInt32 (nameof NpgsqlDbType.Xid)
+    let cid = mapping "cid" "uint" DbType.UInt32 (nameof NpgsqlDbType.Cid)
+
+    [
+        "tableoid",
+        mapping "oid" "uint" DbType.UInt32 (nameof NpgsqlDbType.Oid),
+        { Doc = [ "The OID of the table this row came from. Constant for a query against one table; it"
+                  "earns its keep when the query spans a partition or inheritance hierarchy." ] }
+
+        "xmin",
+        xid,
+        { Doc = [ "The id of the transaction that inserted this row version — PostgreSQL's row"
+                  "version. It changes on every write to the row, which is what makes it usable as"
+                  "an optimistic-concurrency check: read it, then include it in the WHERE of the"
+                  "UPDATE. If someone else wrote first the UPDATE matches no rows." ] }
+
+        "cmin",
+        cid,
+        { Doc = [ "The command id within the inserting transaction. Only meaningful inside that"
+                  "transaction." ] }
+
+        "xmax",
+        xid,
+        { Doc = [ "The id of the transaction that deleted this row version, or 0 for a live row." ] }
+
+        "cmax",
+        cid,
+        { Doc = [ "The command id within the deleting transaction. Only meaningful inside that"
+                  "transaction." ] }
+
+        "ctid",
+        mapping "tid" "NpgsqlTypes.NpgsqlTid" DbType.Object (nameof NpgsqlDbType.Tid),
+        { Doc = [ "WARNING: not a row identifier. `ctid` is the physical location of this row"
+                  "version, and it changes when the row is updated and when VACUUM FULL or CLUSTER"
+                  "moves it. It is valid only for as long as you hold the row you read it from."
+                  "Use the primary key for identity and `xmin` for versioning." ] }
+    ]
+
+/// The six system-column names, in the order the PostgreSQL manual lists them.
+let systemColumnNames = systemColumns |> List.map (fun (name, _, _) -> name)
+
+/// Builds the `Column` for a configured system-column name, or fails naming the six that
+/// exist. A name that is not one of them is a typo, and silently generating nothing for
+/// it is the failure mode that costs an afternoon.
+let toSystemColumn (name: string) : Column =
+    let normalized = name.ToLower().Trim()
+
+    match systemColumns |> List.tryFind (fun (n, _, _) -> n = normalized) with
+    | Some(n, typeMapping, systemColumn) ->
+        {
+            Column.Name = n
+            Column.IsNullable = false
+            Column.IsPK = false
+            Column.TypeMapping = typeMapping
+            Column.SystemColumn = Some systemColumn
+        }
+    | None ->
+        failwithf
+            "`system_columns` names %s, which is not a PostgreSQL system column. The six are: %s."
+            (sprintf "'%s'" name)
+            (systemColumnNames |> String.concat ", ")

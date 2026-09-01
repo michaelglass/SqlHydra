@@ -219,7 +219,32 @@ module internal QueryUtils =
         p.GetValue(entity)
         |> getQueryParameterForValue p
 
+    /// True when a record field is marked `[<SystemColumn>]`.
+    let internal isSystemColumnProp (p: MemberInfo) =
+        Attribute.IsDefined(p, typeof<SqlHydra.SystemColumnAttribute>, false)
+
+    /// The names of the `[<SystemColumn>]` fields on record type `t` (Option/Nullable
+    /// unwrapped), empty for anything that is not a record. Drives both halves of the
+    /// treatment: appended by name to a whole-entity SELECT, and kept out of every INSERT
+    /// column list and UPDATE SET clause.
+    let internal getSystemColumnNames (t: Type) : Set<string> =
+        let recordType =
+            if t.IsGenericType
+               && (t.GetGenericTypeDefinition() = typedefof<Option<_>>
+                   || t.GetGenericTypeDefinition() = typedefof<Nullable<_>>)
+            then t.GenericTypeArguments.[0]
+            else t
+
+        if FSharp.Reflection.FSharpType.IsRecord recordType then
+            FSharp.Reflection.FSharpType.GetRecordFields(recordType)
+            |> Array.filter isSystemColumnProp
+            |> Array.map (fun p -> p.Name)
+            |> Set.ofArray
+        else Set.empty
+
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
+        let systemColumns = getSystemColumnNames typeof<'T>
+
         let kvps =
             match spec.Entity, spec.SetValues with
             | Some entity, [] ->
@@ -241,6 +266,11 @@ module internal QueryUtils =
                 failwith "Either an `entity`, `set`, or `setRaw` operation must be present in an `update` expression."
             | None, setValues -> setValues
 
+        // The database owns a system column's value, so it can never appear in a SET
+        // clause. Filtering here rather than at the call site is what lets `entity row`
+        // keep working on a record that carries one.
+        let kvps = kvps |> List.filter (fun (col, _) -> not (systemColumns.Contains col))
+
         {
             Table = spec.Table
             SetColumns = kvps
@@ -252,6 +282,8 @@ module internal QueryUtils =
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
+        let systemColumns = getSystemColumnNames typeof<'T>
+
         let includedProperties =
             match spec.Fields with
             | [] ->
@@ -260,6 +292,9 @@ module internal QueryUtils =
                 let included = fields |> Set.ofList
                 FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
                 |> Array.filter (fun p -> included.Contains(p.Name))
+            // Same as the SET clause above: never INSERTed, so a record that carries one
+            // can still be inserted whole.
+            |> Array.filter (fun p -> not (systemColumns.Contains p.Name))
 
         let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
 

@@ -23,6 +23,7 @@ let ``Save: All``() =
             NullablePropertyType = NullablePropertyType.Option
             ProviderDbTypeAttributes = true
             TableDeclarations = true
+            SystemColumns = []
             Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
             Filters = Filters.Empty
             TypeMappingExtensions = []
@@ -72,6 +73,7 @@ let ``Read: with no filters``() =
             NullablePropertyType = NullablePropertyType.Option
             ProviderDbTypeAttributes = true
             TableDeclarations = false
+            SystemColumns = []
             Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
             Filters = Filters.Empty
             TypeMappingExtensions = []
@@ -102,6 +104,7 @@ let ``Read: when no readers section should be None``() =
             NullablePropertyType = NullablePropertyType.Option
             ProviderDbTypeAttributes = true
             TableDeclarations = false
+            SystemColumns = []
             Readers = None
             Filters = Filters.Empty
             TypeMappingExtensions = []
@@ -165,3 +168,43 @@ let ``Read: should parse schema restrictions``() =
     let cfg = TomlConfigParser.read(toml)
 
     cfg.Filters =! expectedFilters
+
+[<Test>]
+let ``Read: system_columns``() =
+    let toml =
+        """
+        [general]
+        connection = "Host=localhost;Database=AdventureWorks"
+        output = "AdventureWorks.fs"
+        namespace = "SampleApp.AdventureWorks"
+        cli_mutable = true
+        [sqlhydra_query_integration]
+        provider_db_type_attributes = true
+        table_declarations = true
+        system_columns = [ "xmin", "ctid" ]
+        """
+
+    TomlConfigParser.read(toml).SystemColumns =! [ "xmin"; "ctid" ]
+
+[<Test>]
+let ``Save: omits system_columns when none are configured``() =
+    // The key exists to be opted into. Writing an empty array into every generated TOML
+    // would put it in front of people who have no use for it.
+    let cfg =
+        {
+            ConnectionString = "Host=localhost;Database=AdventureWorks"
+            OutputFile = "AdventureWorks.fs"
+            Namespace = "SampleApp.AdventureWorks"
+            IsCLIMutable = true
+            IsMutableProperties = false
+            NullablePropertyType = NullablePropertyType.Option
+            ProviderDbTypeAttributes = true
+            TableDeclarations = true
+            SystemColumns = []
+            Readers = None
+            Filters = Filters.Empty
+            TypeMappingExtensions = []
+        }
+
+    TomlConfigParser.save(cfg).Contains("system_columns") =! false
+    TomlConfigParser.save({ cfg with SystemColumns = [ "xmin" ] }).Contains("system_columns") =! true

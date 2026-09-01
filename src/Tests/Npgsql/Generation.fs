@@ -125,3 +125,107 @@ let ``Npgsql table types distinguish base tables from appended views`` tableType
 //let ``Code Should Have ProviderDbTypeAttribute With Jsonb``() =
 //    cfg |> inCode "[<ProviderDbType(\"Jsonb\")>]"
 
+
+// ==========================================
+// Read-only system column code generation.
+// DB-free: drives SchemaTemplate.generate directly with a synthetic schema.
+// ==========================================
+
+let private systemColumnCfg systemColumns : Config =
+    {
+        ConnectionString = ""
+        OutputFile = ""
+        Namespace = "TestNS"
+        IsCLIMutable = true
+        IsMutableProperties = false
+        NullablePropertyType = NullablePropertyType.Option
+        ProviderDbTypeAttributes = true
+        TableDeclarations = true
+        SystemColumns = systemColumns
+        Readers = None
+        Filters = Filters.Empty
+        TypeMappingExtensions = []
+    }
+
+let private currencycode =
+    {
+        Column.Name = "currencycode"
+        Column.IsNullable = false
+        Column.IsPK = true
+        Column.SystemColumn = None
+        Column.TypeMapping =
+            {
+                TypeMapping.ColumnTypeAlias = "character"
+                TypeMapping.ClrType = "string"
+                TypeMapping.DbType = System.Data.DbType.String
+                TypeMapping.ProviderDbType = Some "Char"
+            }
+    }
+
+let private systemColumnSchema systemColumns : Schema =
+    {
+        Tables =
+            [ {
+                Table.Catalog = ""
+                Table.Schema = "sales"
+                Table.Name = "currency"
+                Table.Type = TableType.Table
+                Table.Columns = currencycode :: (systemColumns |> List.map NpgsqlDataTypes.toSystemColumn)
+                Table.TotalColumns = 1 + List.length systemColumns
+              } ]
+        Enums = []
+    }
+
+let private generateWith systemColumns =
+    let version : Version.InformationalVersion =
+        { InformationalVersion = "4.1.0-test"; Version = System.Version(4, 1, 0); PreReleaseSuffix = None }
+    SchemaTemplate.generate (systemColumnCfg systemColumns) Provider.instance (systemColumnSchema systemColumns) version []
+
+[<Test>]
+let ``A system column is generated with the SystemColumn attribute``() =
+    generateWith([ "xmin" ]).Contains("[<SystemColumn>]") =! true
+
+[<Test>]
+let ``An ordinary table generates no SystemColumn attribute``() =
+    generateWith([]).Contains("[<SystemColumn>]") =! false
+
+// The CLR type and provider DB type for each of the six, as verified against a live
+// PostgreSQL: reading gives uint32 for the five id columns and NpgsqlTid for ctid, and
+// the provider DB type is what lets a value of that type be bound as a parameter at all
+// (Npgsql has no default mapping for uint32).
+[<TestCase("tableoid", "tableoid: uint", "Oid")>]
+[<TestCase("xmin", "xmin: uint", "Xid")>]
+[<TestCase("cmin", "cmin: uint", "Cid")>]
+[<TestCase("xmax", "xmax: uint", "Xid")>]
+[<TestCase("cmax", "cmax: uint", "Cid")>]
+[<TestCase("ctid", "ctid: NpgsqlTypes.NpgsqlTid", "Tid")>]
+let ``Each system column generates its own CLR type and provider DB type`` (name: string) (field: string) (providerDbType: string) =
+    let code = generateWith [ name ]
+    code.Contains(field) =! true
+    code.Contains($"[<ProviderDbType(\"{providerDbType}\")>]") =! true
+
+[<Test>]
+let ``All six system columns can be generated at once``() =
+    let code = generateWith NpgsqlDataTypes.systemColumnNames
+    for name in NpgsqlDataTypes.systemColumnNames do
+        code.Contains($"{name}: ") =! true
+
+[<Test>]
+let ``ctid is generated with the caution that it is not a row identifier``() =
+    // The person who names `ctid` in the config is not the person who, months later,
+    // reads `row.ctid` and takes it for an id. A doc comment is what reaches the second
+    // one.
+    let code = generateWith [ "ctid" ]
+    code.Contains("/// WARNING: not a row identifier.") =! true
+    code.Contains("VACUUM FULL") =! true
+
+[<Test>]
+let ``A misspelled system column fails generation, naming the six that exist``() =
+    // Silently generating nothing for a typo is the failure mode this exists to avoid.
+    let ex = Assert.Throws<System.Exception>(fun () -> NpgsqlDataTypes.toSystemColumn "xmim" |> ignore)
+    ex.Message.Contains("'xmim'") =! true
+    ex.Message.Contains("tableoid, xmin, cmin, xmax, cmax, ctid") =! true
+
+[<Test>]
+let ``A table declaration is still emitted for a table with a system column``() =
+    generateWith([ "xmin" ]).Contains("let currency = table<currency>") =! true

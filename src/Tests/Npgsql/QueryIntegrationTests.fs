@@ -794,3 +794,200 @@ let ``SqlFn - PostgreSQL functions smoke test``() = task {
     upperName =! "KEN"
     Assert.That(middleName, Is.Not.Null)
 }
+
+// ==========================================
+// Read-only system columns, end to end against a live PostgreSQL row.
+// A hand-written fixture standing in for what the generator emits for
+// `system_columns = ["tableoid", "xmin", "cmin", "xmax", "cmax", "ctid"]` on the real
+// `sales.currency` table.
+//
+// These assert the round trip, not the emitted SQL: that PostgreSQL returns the columns,
+// that they hydrate into the record, and that a compare-and-swap on the row version
+// actually refuses a stale write. A test that only checks the SQL string proves the
+// string, and the string was never the risky part.
+// ==========================================
+
+module SystemColumnFixture =
+    module sales =
+        [<CLIMutable>]
+        type currency =
+            { [<SqlHydra.ProviderDbType("Char")>]
+              currencycode: string
+              [<SqlHydra.ProviderDbType("Varchar")>]
+              name: string
+              [<SqlHydra.ProviderDbType("Timestamp")>]
+              modifieddate: System.DateTime
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Oid")>]
+              tableoid: uint
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Xid")>]
+              xmin: uint
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Cid")>]
+              cmin: uint
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Xid")>]
+              xmax: uint
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Cid")>]
+              cmax: uint
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Tid")>]
+              ctid: NpgsqlTypes.NpgsqlTid }
+
+    let currency = table<sales.currency>
+
+    /// The database owns every system column, so the values given here are never sent.
+    let row code name : sales.currency =
+        { currencycode = code
+          name = name
+          modifieddate = System.DateTime.Today
+          tableoid = 0u
+          xmin = 0u
+          cmin = 0u
+          xmax = 0u
+          cmax = 0u
+          ctid = NpgsqlTypes.NpgsqlTid(0u, 0us) }
+
+    let delete ctx code =
+        deleteAsync ctx {
+            for c in currency do
+            where (c.currencycode = code)
+        }
+
+    let read ctx code =
+        selectTask ctx {
+            for c in currency do
+            where (c.currencycode = code)
+            select c
+        }
+
+    /// INSERT succeeds only because the system columns are filtered out of the column
+    /// list; PostgreSQL rejects a write that names one.
+    let insert ctx code name =
+        insertTask ctx {
+            for c in currency do
+            entity (row code name)
+        }
+
+[<Test>]
+let ``system columns: all six hydrate on a whole-entity read``() = task {
+    use! ctx = db.OpenContextAsync()
+    let! _ = SystemColumnFixture.delete ctx "SC1"
+    let! inserted = SystemColumnFixture.insert ctx "SC1" "SystemCoin"
+    inserted =! 1
+
+    let! rows = SystemColumnFixture.read ctx "SC1"
+    let row = rows |> Seq.exactlyOne
+
+    // The table's own OID. Real, and the same for every row of the table.
+    row.tableoid >! 0u
+    // The inserting transaction: the row version.
+    row.xmin >! 0u
+    // A live row has not been deleted, so xmax is 0.
+    row.xmax =! 0u
+    // Command ids within their transactions. A single-statement INSERT is command 0.
+    row.cmin =! 0u
+    row.cmax =! 0u
+    // A physical address: (block, offset). Offsets are 1-based, so a real one is never 0.
+    row.ctid.OffsetNumber >! 0us
+
+    let! _ = SystemColumnFixture.delete ctx "SC1"
+    ()
+}
+
+[<Test>]
+let ``system columns: a stale xmin guard matches no rows, the current one wins``() = task {
+    use! ctx = db.OpenContextAsync()
+    let! _ = SystemColumnFixture.delete ctx "SC2"
+    let! _ = SystemColumnFixture.insert ctx "SC2" "SystemCoin"
+
+    let! rows = SystemColumnFixture.read ctx "SC2"
+    let before = rows |> Seq.exactlyOne
+
+    // Pre-computed: SqlHydra does not fold arithmetic inside a predicate.
+    let currentVersion = before.xmin
+    let staleVersion = before.xmin - 1u
+
+    // The whole point: someone else got there first, so the guarded UPDATE touches
+    // nothing and the caller can refuse the edit instead of overwriting silently.
+    let! staleRows =
+        updateTask ctx {
+            for c in SystemColumnFixture.currency do
+            set c.name "Stale"
+            where (c.currencycode = "SC2" && c.xmin = staleVersion)
+        }
+    staleRows =! 0
+
+    let! freshRows =
+        updateTask ctx {
+            for c in SystemColumnFixture.currency do
+            set c.name "Fresh"
+            where (c.currencycode = "SC2" && c.xmin = currentVersion)
+        }
+    freshRows =! 1
+
+    let! rows = SystemColumnFixture.read ctx "SC2"
+    let after = rows |> Seq.exactlyOne
+    after.name =! "Fresh"
+    // Only the successful write took effect, and it moved the row version on.
+    (after.xmin <> before.xmin) =! true
+
+    let! _ = SystemColumnFixture.delete ctx "SC2"
+    ()
+}
+
+[<Test>]
+let ``system columns: an entity update on a record carrying them writes only real columns``() = task {
+    // `entity` builds the SET clause from every field of the record. Without the filter
+    // this statement would try to assign xmin and fail; the row must simply update.
+    use! ctx = db.OpenContextAsync()
+    let! _ = SystemColumnFixture.delete ctx "SC3"
+    let! _ = SystemColumnFixture.insert ctx "SC3" "SystemCoin"
+
+    let! updated =
+        updateTask ctx {
+            for c in SystemColumnFixture.currency do
+            entity (SystemColumnFixture.row "SC3" "Renamed")
+            where (c.currencycode = "SC3")
+        }
+    updated =! 1
+
+    let! rows = SystemColumnFixture.read ctx "SC3"
+    (rows |> Seq.exactlyOne).name =! "Renamed"
+
+    let! _ = SystemColumnFixture.delete ctx "SC3"
+    ()
+}
+
+[<Test>]
+let ``system columns: ctid moves when the row is updated``() = task {
+    // The reason `ctid` carries a warning rather than just support. An UPDATE writes a
+    // new tuple, and the new tuple lives somewhere else — so a ctid read a moment ago
+    // does not identify the row any more. VACUUM FULL and CLUSTER move it too.
+    use! ctx = db.OpenContextAsync()
+    let! _ = SystemColumnFixture.delete ctx "SC4"
+    let! _ = SystemColumnFixture.insert ctx "SC4" "SystemCoin"
+
+    let! rows = SystemColumnFixture.read ctx "SC4"
+    let before = rows |> Seq.exactlyOne
+
+    let! _ =
+        updateTask ctx {
+            for c in SystemColumnFixture.currency do
+            set c.name "Moved"
+            where (c.currencycode = "SC4")
+        }
+
+    let! rows = SystemColumnFixture.read ctx "SC4"
+    let after = rows |> Seq.exactlyOne
+
+    after.name =! "Moved"
+    (after.ctid <> before.ctid) =! true
+    // The primary key, by contrast, is still the identity it was.
+    after.currencycode =! before.currencycode
+
+    let! _ = SystemColumnFixture.delete ctx "SC4"
+    ()
+}

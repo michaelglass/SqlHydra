@@ -17,6 +17,10 @@ let isBaseTableType tableType =
     tableType <> "view" && tableType <> "materialized view"
 
 let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list) : Schema =
+    // Resolved once, up front: a misspelled `system_columns` entry should fail before the
+    // first query, not silently generate a table without the column that was asked for.
+    let configuredSystemColumns = cfg.SystemColumns |> List.map NpgsqlDataTypes.toSystemColumn
+
     use conn = new Npgsql.NpgsqlConnection(cfg.ConnectionString)
     conn.Open()
     // NOTE: GetSchema will fail if a Postgres enum doesn't exists in a custom schema but not in public schema.
@@ -243,6 +247,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
+                            Column.SystemColumn = None
                         }
                     )
                 )
@@ -280,12 +285,14 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                 |> Map.tryFind (tbl.Catalog, tbl.Schema, tbl.Name)
                 |> Option.defaultValue []
 
+            let isBaseTable = isBaseTableType tbl.Type
+
             let tableSchema =
                 {
                     TableSchema.Catalog = tbl.Catalog
                     TableSchema.Schema = tbl.Schema
                     TableSchema.Name = tbl.Name
-                    TableSchema.Type = if isBaseTableType tbl.Type then TableType.Table else TableType.View
+                    TableSchema.Type = if isBaseTable then TableType.Table else TableType.View
                     TableSchema.Columns = tableCols
                 }
 
@@ -300,6 +307,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                             Column.IsNullable = col.IsNullable
                             Column.TypeMapping = typeMapping
                             Column.IsPK = col.IsPrimaryKey
+                            Column.SystemColumn = None
                         }
                     )
                 )
@@ -332,6 +340,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                                 TypeMapping.ProviderDbType = None
                             }
                         Column.IsPK = col.IsPrimaryKey
+                        Column.SystemColumn = None
                     }
                 )
 
@@ -342,6 +351,11 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                 |> SchemaFilters.filterColumns cfg.Filters tbl.Schema tbl.Name
                 |> Seq.toList
 
+            // System columns come from `information_schema` no more than `SELECT *` returns
+            // them, so they are appended here rather than discovered. Views do not have
+            // them: a view row has no physical tuple behind it.
+            let systemColumns = if isBaseTable then configuredSystemColumns else []
+
             if filteredColumns |> Seq.isEmpty then
                 None
             else
@@ -349,8 +363,8 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
                     Table.Catalog = tbl.Catalog
                     Table.Schema = tbl.Schema
                     Table.Name =  tbl.Name
-                    Table.Type = if isBaseTableType tbl.Type then TableType.Table else TableType.View
-                    Table.Columns = filteredColumns
+                    Table.Type = if isBaseTable then TableType.Table else TableType.View
+                    Table.Columns = filteredColumns @ systemColumns
                     Table.TotalColumns = tableCols |> List.length
                 }
         )

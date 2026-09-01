@@ -53,6 +53,13 @@ let read(toml: string) =
                 | Some tblDecl -> tblDecl
                 | None -> true // Default to true [sqlhydra_query_integration] table already exists
             | None -> false // Default to false if [sqlhydra_query_integration] table is missing
+        Config.SystemColumns =
+            match queryIntegrationTableMaybe with
+            | Some queryIntegrationTable ->
+                queryIntegrationTable.TryGet<TomlArray> "system_columns"
+                |> Option.map (Seq.cast<string> >> Seq.toList)
+                |> Option.defaultValue []
+            | None -> [] // Default to none if [sqlhydra_query_integration] table is missing
         Config.Readers = 
             readersTableMaybe
             |> Option.map (fun rdrsTbl -> 
@@ -106,6 +113,8 @@ let save(cfg: Config) =
     let queryInt = TableSyntax("sqlhydra_query_integration")
     queryInt.Items.Add("provider_db_type_attributes", cfg.ProviderDbTypeAttributes)
     queryInt.Items.Add("table_declarations", cfg.TableDeclarations)
+    if not cfg.SystemColumns.IsEmpty then
+        queryInt.Items.Add("system_columns", cfg.SystemColumns |> List.toArray)
     doc.Tables.Add(queryInt)
 
     cfg.Readers |> Option.iter (fun readersConfig ->

@@ -95,6 +95,17 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
                     | _ ->
                         None
 
+                // A read-only system column. The doc comment is emitted first so the caution
+                // on a column like `ctid` reaches every use site, not only whoever set up
+                // the config; the attribute is what SqlHydra.Query reads.
+                match col.SystemColumn with
+                | Some systemColumn ->
+                    for line in systemColumn.Doc do
+                        $"/// {line}"
+
+                    "[<SystemColumn>]"
+                | None -> ()
+
                 if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value
                 let colName = columnName { NamingContext.Table = table; Column = Some col }
                 $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks colName}: {columnPropertyType}"""

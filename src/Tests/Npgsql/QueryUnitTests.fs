@@ -1721,3 +1721,106 @@ let ``two ordinary .NET calls in a where are evaluated, not rendered``() =
         |> ignore
     let ex = Assert.Throws<NotImplementedException>(fun () -> build ())
     test <@ ex.Message.Contains("Value to value") @>
+
+// ==========================================
+// Read-only system columns ([<SystemColumn>]).
+// A hand-written fixture standing in for what the generator emits for
+// `system_columns = ["xmin", "ctid"]` on the real `sales.currency` table.
+// ==========================================
+
+module SystemColumnFixture =
+    module sales =
+        [<CLIMutable>]
+        type currency =
+            { [<SqlHydra.ProviderDbType("Char")>]
+              currencycode: string
+              [<SqlHydra.ProviderDbType("Varchar")>]
+              name: string
+              [<SqlHydra.ProviderDbType("Timestamp")>]
+              modifieddate: System.DateTime
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Xid")>]
+              xmin: uint
+              [<SqlHydra.SystemColumn>]
+              [<SqlHydra.ProviderDbType("Tid")>]
+              ctid: NpgsqlTypes.NpgsqlTid }
+
+    let currency = table<sales.currency>
+
+    let sampleRow : sales.currency =
+        { currencycode = "BTC"
+          name = "BitCoin"
+          modifieddate = DateTime.Today
+          xmin = 0u
+          ctid = NpgsqlTypes.NpgsqlTid(0u, 0us) }
+
+[<Test>]
+let ``system column: whole-entity select appends every system column by name``() =
+    let sql =
+        select {
+            for c in SystemColumnFixture.currency do
+            select c
+        }
+        |> toSql
+    // `"c".*` excludes them, so they must be named.
+    sql =! "SELECT \"c\".*, \"c\".\"ctid\", \"c\".\"xmin\" FROM \"sales\".\"currency\" AS \"c\""
+
+[<Test>]
+let ``system column: a joined select keeps each table's system column under its own alias``() =
+    // The mistake to avoid: appending to whatever projection came last, so that `o.*`
+    // gains a column belonging to `c`.
+    let sql =
+        select {
+            for c in SystemColumnFixture.currency do
+            join r in sales.currencyrate on (c.currencycode = r.fromcurrencycode)
+            select (c, r)
+        }
+        |> toSql
+    sql.Contains("SELECT \"c\".*, \"c\".\"ctid\", \"c\".\"xmin\", \"r\".*") =! true
+    sql.Contains("\"r\".\"xmin\"") =! false
+
+[<Test>]
+let ``system column: a table without one appends nothing``() =
+    let sql =
+        select {
+            for c in sales.currency do
+            select c
+        }
+        |> toSql
+    sql =! "SELECT \"c\".* FROM \"sales\".\"currency\" AS \"c\""
+
+[<Test>]
+let ``system column: insert leaves them out of the column list``() =
+    let sql =
+        insert {
+            into SystemColumnFixture.currency
+            entity SystemColumnFixture.sampleRow
+        }
+        |> toInsertSql
+    sql =! """INSERT INTO "sales"."currency" ("currencycode", "name", "modifieddate") VALUES (@p0, @p1, @p2)"""
+
+[<Test>]
+let ``system column: entity update leaves them out of the SET clause``() =
+    let sql =
+        update {
+            for c in SystemColumnFixture.currency do
+            entity SystemColumnFixture.sampleRow
+            where (c.currencycode = "BTC")
+        }
+        |> toUpdateSql
+    sql.Contains("\"xmin\" =") =! false
+    sql.Contains("\"ctid\" =") =! false
+    sql.Contains("\"name\" = @p") =! true
+
+[<Test>]
+let ``system column: a where predicate treats it as an ordinary column``() =
+    // Nothing special happens here, and that is the point — the compare-and-swap guard
+    // needs no new operation, only a column that binds with the right provider type.
+    let sql =
+        update {
+            for c in SystemColumnFixture.currency do
+            set c.name "Renamed"
+            where (c.currencycode = "BTC" && c.xmin = 42u)
+        }
+        |> toUpdateSql
+    sql =! """UPDATE "sales"."currency" SET "name" = @p0 WHERE (("sales"."currency"."currencycode" = @p1) AND ("sales"."currency"."xmin" = @p2))"""

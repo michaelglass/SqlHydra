@@ -838,6 +838,67 @@ selectTask db {
 }
 ```
 
+**System columns (`xmin` and friends).** Every PostgreSQL table has six
+[system columns](https://www.postgresql.org/docs/current/ddl-system-columns.html) that
+`SELECT *` does not return and that nothing may write. The most useful is `xmin`, the row
+version — it changes on every write to the row, which makes optimistic concurrency a
+plain column comparison instead of a lock.
+
+Name the ones you want, one at a time, in the `[sqlhydra_query_integration]` section:
+
+```toml
+[sqlhydra_query_integration]
+provider_db_type_attributes = true
+system_columns = ["xmin"]
+```
+
+Each named column is added to every generated table record, tagged `[<SystemColumn>]`.
+SqlHydra.Query then appends it by name to a whole-entity `select` (so it hydrates) and
+drops it from every INSERT column list and UPDATE `SET` clause (so a record carrying it
+can still be written whole). Everywhere else it is an ordinary column:
+
+```fsharp
+// SELECT "c".*, "c"."xmin" FROM "sales"."currency" AS "c" WHERE ...
+let! rows =
+    selectTask db {
+        for c in sales.currency do
+        where (c.currencycode = code)
+        select c
+    }
+
+let current = (rows |> Seq.exactlyOne).xmin
+
+// Compare-and-swap. If someone else wrote first, xmin no longer matches, the UPDATE
+// affects zero rows, and you can refuse the edit instead of overwriting their work.
+let! updated =
+    updateTask db {
+        for c in sales.currency do
+        set c.name newName
+        where (c.currencycode = code && c.xmin = current)
+    }
+
+if updated = 0 then (* conflict *) ()
+```
+
+The six, with the type each is generated as:
+
+| Column | Generated as | What it is |
+| --- | --- | --- |
+| `tableoid` | `uint` (`Oid`) | Which table the row came from. Earns its keep across a partition or inheritance hierarchy. |
+| `xmin` | `uint` (`Xid`) | The inserting transaction — the row version. |
+| `cmin` | `uint` (`Cid`) | Command id within the inserting transaction. |
+| `xmax` | `uint` (`Xid`) | The deleting transaction, or `0` for a live row. |
+| `cmax` | `uint` (`Cid`) | Command id within the deleting transaction. |
+| `ctid` | `NpgsqlTypes.NpgsqlTid` (`Tid`) | Physical location of this row version. |
+
+**`ctid` is not a row identifier.** It is a physical address, and it changes when the row
+is updated and when `VACUUM FULL` or `CLUSTER` moves it. Use the primary key for identity
+and `xmin` for versioning. It is generated with that warning as a doc comment, so it
+reaches the reader rather than only whoever wrote the config.
+
+Naming something that is not one of the six fails generation rather than quietly emitting
+nothing. `system_columns` is PostgreSQL-only; other providers ignore it.
+
 ### SQLite
 
 SQLite uses type affinity. Use standard type aliases in your schema for proper .NET type mapping.
