@@ -928,6 +928,12 @@ is updated and when `VACUUM FULL` or `CLUSTER` moves it. Use the primary key for
 and `xmin` for versioning. It is generated with that warning as a doc comment, so it
 reaches the reader rather than only whoever wrote the config.
 
+**A whole-entity read needs an explicit `select`.** A query with none is `SELECT *`, which
+omits the system column, so the row cannot be built. That says so rather than failing
+obscurely: `Cannot read 'currency': the result set has no column 'xmin'. SELECT * does not
+return a system column, so a whole-entity read has to name it — give the query an explicit
+select.`
+
 **`distinct` and a whole-entity `select` do not combine** on a table with a system column,
 and fail at query construction rather than run. `SELECT DISTINCT "c".*, "c"."xmin"` dedupes
 on the row version too, so two duplicate rows written in separate transactions stop

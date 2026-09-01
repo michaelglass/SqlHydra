@@ -1105,3 +1105,31 @@ let ``read-only columns: getId returns the generated id, though the field list c
 
     do! ReadOnlyColumnFixture.exec ctx "DROP TABLE sales.sqlhydra_readonly;"
 }
+
+[<Test>]
+let ``system columns: a read with no explicit select says which column is missing and why``() = task {
+    // The most idiomatic form in the README is `for c in t do where ...` with no `select`,
+    // which is `SELECT *` — and `SELECT *` omits system columns, so the row cannot be built.
+    // The message has to say that rather than "insufficient number of elements".
+    use! ctx = db.OpenContextAsync()
+    let! _ = SystemColumnFixture.delete ctx "SC5"
+    let! _ = SystemColumnFixture.insert ctx "SC5" "SystemCoin"
+
+    let! message =
+        task {
+            try
+                let! _ =
+                    selectTask ctx {
+                        for c in SystemColumnFixture.currency do
+                        where (c.currencycode = "SC5")
+                    }
+                return "no error"
+            with e -> return e.Message
+        }
+
+    message.Contains("'xmin'") =! true
+    message.Contains("explicit `select`") =! true
+
+    let! _ = SystemColumnFixture.delete ctx "SC5"
+    ()
+}

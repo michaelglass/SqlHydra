@@ -15,18 +15,42 @@ type OrdinalTracker(reader: DbDataReader) =
 
     /// Builds an ordinal lookup for a record type's fields, advancing the ordinal counter.
     member _.BuildGetOrdinal(tableType: Type) =
-        let fieldNames =
-            FSharpType.GetRecordFields(tableType)
-            |> Array.map _.Name
+        let fields = FSharpType.GetRecordFields(tableType)
+        let fieldNames = fields |> Array.map _.Name
 
-        let dictionary =
+        let matched =
             [| 0 .. reader.FieldCount - 1 |]
             |> Array.map (fun i -> reader.GetName(i), i)
             |> Array.sortBy snd
             |> Array.skip accFieldCount
             |> Array.filter (fun (name, _) -> Array.contains name fieldNames)
-            |> Array.take fieldNames.Length
-            |> dict
+
+        // Named here rather than left to `Array.take`, whose "insufficient number of
+        // elements" says nothing about which column is missing or why.
+        if matched.Length < fieldNames.Length then
+            let found = matched |> Array.map fst |> Set.ofArray
+            let missing = fields |> Array.filter (fun p -> not (found.Contains p.Name))
+
+            let systemColumns =
+                missing
+                |> Array.filter (fun p -> Attribute.IsDefined(p, typeof<SqlHydra.SystemColumnAttribute>, false))
+                |> Array.map _.Name
+
+            let hint =
+                if systemColumns.Length = 0 then ""
+                else
+                    // The common way to hit this: a query with no `select`, which is `SELECT *`.
+                    " `SELECT *` does not return a system column, so a whole-entity read has to name it — give the query an explicit `select`."
+
+            let names = missing |> Array.map (fun p -> $"'%s{p.Name}'") |> String.concat ", "
+
+            failwithf
+                "Cannot read '%s': the result set has no %s.%s"
+                tableType.Name
+                (if missing.Length = 1 then $"column {names}" else $"columns {names}")
+                hint
+
+        let dictionary = matched |> Array.take fieldNames.Length |> dict
         accFieldCount <- accFieldCount + fieldNames.Length
         dictionary
 
