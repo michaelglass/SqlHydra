@@ -95,6 +95,11 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
                     | _ ->
                         None
 
+                // Emitted whatever `provider_db_type_attributes` says: a column the database
+                // owns is read-only regardless of how parameters bind, and the generated file
+                // already depends on SqlHydra.Query for its version check.
+                if col.IsReadOnly then "[<ReadOnlyColumn>]"
+
                 if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value
                 let colName = columnName { NamingContext.Table = table; Column = Some col }
                 $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks colName}: {columnPropertyType}"""
