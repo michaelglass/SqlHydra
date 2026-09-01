@@ -1,6 +1,7 @@
 namespace SqlHydra.Query
 
 open System.Reflection
+open System.Collections.Concurrent
 open System.Collections.Generic
 open System
 
@@ -219,8 +220,12 @@ module internal QueryUtils =
         p.GetValue(entity)
         |> getQueryParameterForValue p
 
+    /// Reflection over a type's fields yields the same answer every time, and this runs on
+    /// every query build, so it is cached rather than repeated.
+    let private markedFieldNames = ConcurrentDictionary<Type * Type, Set<string>>()
+
     /// Field names on `t` carrying `attribute` (Option/Nullable unwrapped); empty if not a record.
-    let internal getMarkedFieldNames (attribute: Type) (t: Type) : Set<string> =
+    let private findMarkedFieldNames (attribute: Type) (t: Type) : Set<string> =
         let recordType =
             if t.IsGenericType
                && (t.GetGenericTypeDefinition() = typedefof<Option<_>>
@@ -234,6 +239,9 @@ module internal QueryUtils =
             |> Array.map (fun p -> p.Name)
             |> Set.ofArray
         else Set.empty
+
+    let internal getMarkedFieldNames (attribute: Type) (t: Type) =
+        markedFieldNames.GetOrAdd((attribute, t), Func<_, _>(fun (attr, ty) -> findMarkedFieldNames attr ty))
 
     /// `[<ReadOnlyColumn>]` fields: the database owns these, so they are never written.
     /// `[<SystemColumn>]` derives from it, and attribute lookup matches subclasses.
