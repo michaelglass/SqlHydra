@@ -172,7 +172,7 @@ let private generatedRate =
                 TypeMapping.ProviderDbType = Some "Numeric"
             } }
 
-let private generateColumns columns =
+let private generateTable columns =
     let schema : Schema =
         {
             Tables =
@@ -181,13 +181,16 @@ let private generateColumns columns =
                     Table.Schema = "sales"
                     Table.Name = "currency"
                     Table.Type = TableType.Table
-                    Table.Columns = currencycode :: columns
-                    Table.TotalColumns = 1 + List.length columns
+                    Table.Columns = columns
+                    Table.TotalColumns = List.length columns
                   } ]
             Enums = []
         }
 
     SchemaTemplate.generate baseCfg Provider.instance schema (Version.get()) []
+
+/// `currency` with its writable key and the given columns.
+let private generateColumns columns = generateTable (currencycode :: columns)
 
 [<Test>]
 let ``A generated column is marked read-only in the generated record``() =
@@ -198,6 +201,38 @@ let ``A generated column is marked read-only in the generated record``() =
 [<Test>]
 let ``An ordinary column carries no attribute``() =
     (generateColumns []).Contains("[<ReadOnlyColumn>]") =! false
+
+// The write record: `{table}_write`, the read record minus its read-only columns.
+
+/// The generated code from the write record's declaration on.
+let private writeRecordOf (table: string) (code: string) =
+    match code.IndexOf $"type {table}_write =" with
+    | -1 -> failwith $"no write record for {table} in:\n{code}"
+    | at -> code.Substring at
+
+[<Test>]
+let ``A table with a read-only column gets a write record of the other columns``() =
+    let writeRecord = generateColumns [ generatedRate ] |> writeRecordOf "currency"
+    writeRecord.Contains("currencycode: string") =! true
+    writeRecord.Contains("rate: decimal") =! false
+    writeRecord.Contains("[<ReadOnlyColumn>]") =! false
+
+[<Test>]
+let ``The write record implements IWriteOf of its read record``() =
+    // This is what lets `writeEntity` refuse the read record and another table's write record.
+    let writeRecord = generateColumns [ generatedRate ] |> writeRecordOf "currency"
+    writeRecord.Contains("interface IWriteOf<currency>") =! true
+
+[<Test>]
+let ``A table with no read-only column gets no write record``() =
+    let code = generateColumns []
+    code.Contains("_write") =! false
+    code.Contains("IWriteOf") =! false
+
+[<Test>]
+let ``A table where every column is read-only gets no write record, since a record cannot be empty``() =
+    let code = generateTable [ { currencycode with Column.IsReadOnly = true }; generatedRate ]
+    code.Contains("_write") =! false
 
 // Read-only detection against a live PostgreSQL: the four column kinds in one table, plus a
 // writable `tax` in the same schema and another in a same-named table elsewhere. Drop either

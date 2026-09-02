@@ -88,7 +88,8 @@ type PendingConflictTarget =
 type InsertQuerySpec<'T, 'Identity> =
     {
         Table: string
-        Entities: 'T list
+        /// Boxed: a `'T` row, or an `IWriteOf<'T>` row that has no field for a read-only column.
+        Entities: obj list
         Fields: string list
         IdentityField: string option
         OutputFields: OutputField list
@@ -109,7 +110,8 @@ type InsertQuerySpec<'T, 'Identity> =
 type UpdateQuerySpec<'T, 'UpdateReturn> =
     {
         Table: string
-        Entity: 'T option
+        /// Boxed: a `'T` row, or an `IWriteOf<'T>` row that has no field for a read-only column.
+        Entity: obj option
         Fields: string list
         SetValues: (string * obj) list
         RawSetValues: (string * string * obj[]) list
@@ -120,7 +122,7 @@ type UpdateQuerySpec<'T, 'UpdateReturn> =
         CommandOptions: CommandOptions
     }
     static member Default : UpdateQuerySpec<'T, 'UpdateReturn> =
-        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; RawSetValues = []
+        { Table = ""; Entity = None; Fields = []; SetValues = []; RawSetValues = []
           Where = WhereClause.Empty; OutputFields = []; UpdateAll = false; Returning = []
           CommandOptions = CommandOptions.Default }
 
@@ -223,9 +225,10 @@ module internal QueryUtils =
     let private isWritable (p: PropertyInfo) =
         not (Attribute.IsDefined(p, typeof<SqlHydra.ReadOnlyColumnAttribute>, false))
 
-    /// The record fields an INSERT or UPDATE may name: `fields` when given, else all of them.
-    let private writableProperties<'T> (fields: string list) =
-        let all = FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+    /// The fields of `rowType` an INSERT or UPDATE may name: `fields` when given, else all of them.
+    /// For a write record the read-only filter has nothing to drop; it is the same rule either way.
+    let private writableProperties (rowType: Type) (fields: string list) =
+        let all = FSharp.Reflection.FSharpType.GetRecordFields(rowType)
         let included =
             match fields with
             | [] -> all
@@ -238,7 +241,8 @@ module internal QueryUtils =
         let kvps =
             match spec.Entity, spec.SetValues with
             | Some entity, [] ->
-                writableProperties<'T> spec.Fields
+                // The row's own type, not 'T: a write record carries only the writable fields.
+                writableProperties (entity.GetType()) spec.Fields
                 |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
                 |> Array.toList
 
@@ -258,7 +262,13 @@ module internal QueryUtils =
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
-        let includedProperties = writableProperties<'T> spec.Fields
+        // The rows' own type, not 'T: a write record carries only the writable fields.
+        // With no rows the columns come from 'T, as `insert ... select` needs.
+        let rowType =
+            match spec.Entities with
+            | [] -> typeof<'T>
+            | firstRow :: _ -> firstRow.GetType()
+        let includedProperties = writableProperties rowType spec.Fields
 
         let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
 

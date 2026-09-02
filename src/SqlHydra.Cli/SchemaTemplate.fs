@@ -60,48 +60,65 @@ let mkTable cfg db (table: Table) schema tableName columnName = stringBuffer {
         db.Tables
         |> List.find (fun t -> t.Schema = schema && t.Name = table.Name)
 
-    if cfg.IsCLIMutable then "[<CLIMutable>]"
+    let columnPropertyType (col: Column) =
+        let baseType =
+            // Handles array types: "byte[]", "string[]", "int[]", "int []", "int array"
+            if col.TypeMapping.ClrType.EndsWith "[]" || col.TypeMapping.ClrType.EndsWith "array" then
+                let baseTypeNm = col.TypeMapping.ClrType.Split([| "[]"; " []"; " array" |], System.StringSplitOptions.RemoveEmptyEntries) |> Array.head
+                $"{baseTypeNm} []"
+            else
+                col.TypeMapping.ClrType
+
+        if col.IsNullable then
+            match cfg.NullablePropertyType with
+            | NullablePropertyType.Option ->
+                $"Option<{baseType}>"
+            | NullablePropertyType.Nullable ->
+                if col.TypeMapping.IsValueType()
+                then $"System.Nullable<{baseType}>"
+                else baseType
+        else
+            baseType
+
+    let providerDbTypeAttribute (col: Column) =
+        match col.TypeMapping.ProviderDbType with
+        | Some providerDbType when cfg.ProviderDbTypeAttributes ->
+            Some $"[<ProviderDbType(\"{providerDbType}\")>]"
+        | _ ->
+            None
+
+    let mkRecord (typeName: string) (columns: Column list) (trailer: string option) = stringBuffer {
+        if cfg.IsCLIMutable then "[<CLIMutable>]"
+        $"type {backticks typeName} ="
+        indent {
+            "{"
+            indent {
+                for col in columns do
+                    if col.IsReadOnly then "[<ReadOnlyColumn>]"
+                    match providerDbTypeAttribute col with
+                    | Some attribute -> attribute
+                    | None -> ()
+                    let colName = columnName { NamingContext.Table = table; Column = Some col }
+                    $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks colName}: {columnPropertyType col}"""
+            }
+            "}"
+            match trailer with
+            | Some line -> line
+            | None -> ()
+        }
+    }
 
     let tblName = tableName { NamingContext.Table = table; Column = None }
-    $"type {backticks tblName} ="
-    indent {
-        "{"
-        indent {
-            for col in tableType.Columns do
-                let baseType =
-                    // Handles array types: "byte[]", "string[]", "int[]", "int []", "int array"
-                    if col.TypeMapping.ClrType.EndsWith "[]" || col.TypeMapping.ClrType.EndsWith "array" then
-                        let baseTypeNm = col.TypeMapping.ClrType.Split([| "[]"; " []"; " array" |], System.StringSplitOptions.RemoveEmptyEntries) |> Array.head
-                        $"{baseTypeNm} []"
-                    else
-                        col.TypeMapping.ClrType
+    mkRecord tblName tableType.Columns None
 
-                let columnPropertyType =
-                    if col.IsNullable then
-                        match cfg.NullablePropertyType with
-                        | NullablePropertyType.Option ->
-                            $"Option<{baseType}>"
-                        | NullablePropertyType.Nullable ->
-                            if col.TypeMapping.IsValueType()
-                            then $"System.Nullable<{baseType}>"
-                            else baseType
-                    else
-                        baseType
+    let writableColumns, readOnlyColumns =
+        tableType.Columns |> List.partition (fun col -> not col.IsReadOnly)
 
-                let providerDbTypeAttribute =
-                    match col.TypeMapping.ProviderDbType with
-                    | Some providerDbType when cfg.ProviderDbTypeAttributes ->
-                        Some $"[<ProviderDbType(\"{providerDbType}\")>]"
-                    | _ ->
-                        None
-
-                if col.IsReadOnly then "[<ReadOnlyColumn>]"
-                if providerDbTypeAttribute.IsSome then providerDbTypeAttribute.Value
-                let colName = columnName { NamingContext.Table = table; Column = Some col }
-                $"""{if cfg.IsMutableProperties then "mutable " else ""}{backticks colName}: {columnPropertyType}"""
-        }
-        "}"
-    }
+    // Only a table with something to hide needs a write record, and a record cannot be empty.
+    if not readOnlyColumns.IsEmpty && not writableColumns.IsEmpty then
+        ""
+        $"/// The columns of `{tblName}` a caller may write; the database owns the rest."
+        mkRecord $"{tblName}_write" writableColumns (Some $"interface IWriteOf<{backticks tblName}>")
 }
 
 let generate (cfg: Config) (provider: ISqlHydraDbProvider) (db: Schema) (version: Version.InformationalVersion) (namingExtensions: IExtendNaming list) = stringBuffer {
