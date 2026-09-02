@@ -200,6 +200,46 @@ let main _ =
         ConsumerB.logRow rows.Head
         printfn "         taxes      = %A" (ConsumerB.taxes () |> ctx.Select |> Seq.toList))
 
+    hdr "14. Design B: entity update, and the full round-trip the feature exists for"
+    let mutable rowB = Unchecked.defaultof<SchemaB.sales.spike_readonly>
+    exec ctx "DELETE FROM sales.spike_readonly;"
+    tryIt "seed one row via B" (fun () ->
+        insert { into SchemaB.spike; entity (ConsumerB.newRow "b-rt" 10m) } |> ctx.Insert |> ignore)
+
+    tryIt "read a B row" (fun () ->
+        rowB <-
+            select {
+                for i in SchemaB.spike do
+                where (i.code = "b-rt")
+                select i
+            }
+            |> ctx.Select
+            |> Seq.head
+        printfn "         before: price=%M tax=%M label=%s disc=%A"
+            rowB.price rowB.tax.Value rowB.label.Value (rowB.disc |> Option.map _.Value))
+
+    tryIt "update entity (B) — read-only cols dropped from SET" (fun () ->
+        let n =
+            update {
+                for i in SchemaB.spike do
+                entity { rowB with price = 33m }
+                where (i.code = "b-rt")
+            }
+            |> ctx.Update
+        printfn "         rows updated = %d" n)
+
+    tryIt "re-read after update (B) — generated cols recomputed by the db" (fun () ->
+        let r =
+            select {
+                for i in SchemaB.spike do
+                where (i.code = "b-rt")
+                select i
+            }
+            |> ctx.Select
+            |> Seq.head
+        printfn "         after:  price=%M tax=%M label=%s dear=%b disc=%A"
+            r.price r.tax.Value r.label.Value r.dear.Value (r.disc |> Option.map _.Value))
+
     exec ctx dropDdl
     printfn "\ndone."
     0

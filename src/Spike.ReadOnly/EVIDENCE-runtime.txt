@@ -114,4 +114,17 @@ tax=2.0 disc=None
          taxes      = [{ Value = 2.0M }; { Value = 1.0M }]
   [ok]   ConsumerB
 
+========== 14. Design B: entity update, and the full round-trip the feature exists for ==========
+         SQL: INSERT INTO "sales"."spike_readonly" ("seq", "price", "code") VALUES (@p0, @p1, @p2)
+  [ok]   seed one row via B
+         SQL: SELECT "i".* FROM "sales"."spike_readonly" AS "i" WHERE ("i"."code" = @p0)
+         before: price=10 tax=1.0 label=b-rt-gen disc=Some 0.50M
+  [ok]   read a B row
+         SQL: UPDATE "sales"."spike_readonly" SET "seq" = @p0, "price" = @p1, "code" = @p2 WHERE ("sales"."spike_readonly"."code" = @p3)
+         rows updated = 1
+  [ok]   update entity (B) — read-only cols dropped from SET
+         SQL: SELECT "i".* FROM "sales"."spike_readonly" AS "i" WHERE ("i"."code" = @p0)
+         after:  price=33 tax=3.3 label=b-rt-gen dear=true disc=Some 1.65M
+  [ok]   re-read after update (B) — generated cols recomputed by the db
+
 done.

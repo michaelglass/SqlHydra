@@ -226,13 +226,29 @@ let private buildRecordFieldReaders (reader: DbDataReader) (recordType: Type) (o
         let baseType = unwrapType fieldType
         // Reference types (e.g. string, byte[]) can be NULL in SQL even without Option/Nullable wrapper
         let isNullable = isNullable || (not isOpt && baseType.IsClass)
-        let columnReader = makeColumnReader reader baseType isOpt isNullable
         // SPIKE (design B): a ReadOnly<'T> field reads as 'T, then gets wrapped.
+        // NOTE: `Option<ReadOnly<'T>>` (a NULLable read-only column) needs its own
+        // branch — unwrapType strips one level, so the generic path below would hand
+        // ReadOnly<'T> to GetFieldValue and only blow up on rows where the column is
+        // NOT null. That is how this was found.
         let columnReader =
-            if isReadOnlyWrapper fieldType then
+            if isOpt && isReadOnlyWrapper (unwrapType fieldType) then
+                let w = unwrapType fieldType
+                let inner = unwrapType w
+                let raw = makeColumnReader reader inner false false
+                let wrap = readOnlyWrapper w
+                let cases = FSharpType.GetUnionCases(fieldType)
+                let someCase = cases |> Array.find (fun c -> c.Name = "Some")
+                let noneValue =
+                    FSharpValue.MakeUnion(cases |> Array.find (fun c -> c.Name = "None"), [||])
+                fun (ordinal: int) ->
+                    if reader.IsDBNull(ordinal) then noneValue
+                    else FSharpValue.MakeUnion(someCase, [| wrap (raw ordinal) |])
+            elif isReadOnlyWrapper fieldType then
                 let wrap = readOnlyWrapper fieldType
-                columnReader >> wrap
-            else columnReader
+                (makeColumnReader reader baseType isOpt isNullable) >> wrap
+            else
+                makeColumnReader reader baseType isOpt isNullable
         let ordinal = ordinalLookup.[pi.Name]
         (ordinal, columnReader)
     )
