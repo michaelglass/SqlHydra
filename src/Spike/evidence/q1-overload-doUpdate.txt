@@ -1,0 +1,3 @@
+src/Tests/Npgsql/QueryUnitTests.fs(1202,13): error FS0041: A unique overload for method 'DoUpdate' could not be determined based on type information prior to this program point. A type annotation may be needed.Known types of arguments: QuerySource<person.address,InsertQuerySpec<person.address,'a>> * 'bCandidates: - member InsertBuilder.DoUpdate: state: QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>> *
+src/Tests/Npgsql/QueryUnitTests.fs(1202,13): error FS3131: The definition of the custom operator 'doUpdate' does not use a valid combination of attribute flags
+src/Tests/Npgsql/QueryUnitTests.fs(1202,24): error FS0039: The type 'a' does not define a field, constructor, or member named 'city'.

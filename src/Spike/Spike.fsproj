@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Throwaway compile probes. Select one with: dotnet build -p:Probe=<name> -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Fixture.fs" />
+    <Compile Include="$(Probe).fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SqlHydra.Query\SqlHydra.Query.fsproj" />
+    <ProjectReference Include="..\SqlHydra.Domain\SqlHydra.Domain.fsproj" />
+  </ItemGroup>
+</Project>

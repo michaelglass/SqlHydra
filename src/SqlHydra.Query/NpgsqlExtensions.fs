@@ -216,6 +216,23 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
             { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields); PendingConflict = None },
             state.TableMappings)
 
+    /// Conflict action: DO UPDATE SET col=EXCLUDED.col, selecting over the write record so a read-only column cannot be named.
+    [<CustomOperation("doUpdateWrite", MaintainsVariableSpace = true)>]
+    member this.DoUpdateWrite<'T, 'InsertReturn, 'Write, 'UpdateProperties when 'Write :> SqlHydra.IWriteOf<'T>>(
+        state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+        updateFields: System.Linq.Expressions.Expression<Func<'Write, 'UpdateProperties>>) =
+        let spec = state.Query
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'Write, 'UpdateProperties> updateFields (fun _ p -> p.Name)
+        let conflictFields =
+            match spec.PendingConflict with
+            | Some (TypedConflictColumns (fields, None)) -> fields
+            | Some (TypedConflictColumns _) -> failwith "doUpdateWrite does not currently support a partial-index WHERE clause"
+            | Some (RawConflictTarget _) -> failwith "doUpdateWrite requires a typed conflict target (use onConflict, not onConflictRaw)"
+            | None -> failwith "doUpdateWrite requires onConflict to be called first"
+        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
+            { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields); PendingConflict = None },
+            state.TableMappings)
+
     /// Conflict action: DO UPDATE SET — `updateFields` are updated as `col = EXCLUDED.col`,
     /// except those listed in `coalesceFields` which become `col = COALESCE(EXCLUDED.col, col)`.
     /// `coalesceFields` should be a subset of `updateFields`.

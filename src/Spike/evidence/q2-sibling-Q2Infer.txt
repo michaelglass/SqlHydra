@@ -1,0 +1,2 @@
+    1 Error(s)
+src/Spike/Q2Infer.fs(11,33): error FS0072: The type of this expression could not be inferred before accessing its members. Add a type annotation, e.g. (expr: SomeType), to constrain the type before this point.
