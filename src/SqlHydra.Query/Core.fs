@@ -1,7 +1,6 @@
 namespace SqlHydra.Query
 
 open System.Reflection
-open System.Collections.Concurrent
 open System.Collections.Generic
 open System
 
@@ -220,36 +219,26 @@ module internal QueryUtils =
         p.GetValue(entity)
         |> getQueryParameterForValue p
 
-    /// Cached: fixed per type, and looked up on every query build.
-    let private readOnlyColumnNames = ConcurrentDictionary<Type, Set<string>>()
+    /// `[<ReadOnlyColumn>]` marks a field the database owns; it is never written.
+    let private isWritable (p: PropertyInfo) =
+        not (Attribute.IsDefined(p, typeof<SqlHydra.ReadOnlyColumnAttribute>, false))
 
-    /// `[<ReadOnlyColumn>]` fields: the database owns these, so they are never written.
-    let internal getReadOnlyColumnNames (t: Type) =
-        readOnlyColumnNames.GetOrAdd(t, Func<Type, Set<string>>(fun ty ->
-            if FSharp.Reflection.FSharpType.IsRecord ty then
-                FSharp.Reflection.FSharpType.GetRecordFields(ty)
-                |> Array.filter (fun p -> Attribute.IsDefined(p, typeof<SqlHydra.ReadOnlyColumnAttribute>, false))
-                |> Array.map (fun p -> p.Name)
-                |> Set.ofArray
-            else Set.empty))
+    /// The record fields an INSERT or UPDATE may name: `fields` when given, else all of them.
+    let private writableProperties<'T> (fields: string list) =
+        let all = FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+        let included =
+            match fields with
+            | [] -> all
+            | _ ->
+                let names = Set.ofList fields
+                all |> Array.filter (fun p -> names.Contains p.Name)
+        included |> Array.filter isWritable
 
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
-        let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
-
         let kvps =
             match spec.Entity, spec.SetValues with
             | Some entity, [] ->
-                let properties =
-                    match spec.Fields with
-                    | [] ->
-                        FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
-                    | fields ->
-                        let included = fields |> Set.ofList
-                        FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
-                        |> Array.filter (fun p -> included.Contains(p.Name))
-
-                properties
-                |> Array.filter (fun p -> not (readOnlyColumns.Contains p.Name))
+                writableProperties<'T> spec.Fields
                 |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
                 |> Array.toList
 
@@ -269,17 +258,7 @@ module internal QueryUtils =
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
-        let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
-
-        let includedProperties =
-            match spec.Fields with
-            | [] ->
-                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
-            | fields ->
-                let included = fields |> Set.ofList
-                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
-                |> Array.filter (fun p -> included.Contains(p.Name))
-            |> Array.filter (fun p -> not (readOnlyColumns.Contains p.Name))
+        let includedProperties = writableProperties<'T> spec.Fields
 
         let columns = includedProperties |> Array.map (fun p -> p.Name) |> Array.toList
 

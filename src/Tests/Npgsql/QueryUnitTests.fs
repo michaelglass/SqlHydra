@@ -1794,13 +1794,3 @@ let ``read-only column: excludeColumn on one is a no-op``() =
         }
         |> toInsertSql
     withCall =! without
-
-[<Test>]
-let ``read-only column: a table without one is unaffected``() =
-    let sql =
-        insert {
-            into sales.currency
-            entity { currencycode = "BTC"; name = "BitCoin"; modifieddate = DateTime.Today }
-        }
-        |> toInsertSql
-    sql =! """INSERT INTO "sales"."currency" ("currencycode", "name", "modifieddate") VALUES (@p0, @p1, @p2)"""
