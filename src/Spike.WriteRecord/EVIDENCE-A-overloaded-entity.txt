@@ -1,0 +1,36 @@
+############ probes/A01_insert_write_entity.fs
+  COMPILES
+############ probes/A02_insert_read_entity.fs
+  COMPILES
+############ probes/A03_insert_unannotated_literal.fs
+  probes/A03_insert_unannotated_literal.fs(8,18): error FS0039: The record label 'price' is not defined.
+  probes/A03_insert_unannotated_literal.fs(8,31): error FS0039: The record label 'code' is not defined.
+  probes/A03_insert_unannotated_literal.fs(8,9): error FS0041: A unique overload for method 'Entity' could not be determined based on type information prior to this program point. A type annotation may be needed.Known types of arguments: QuerySource<sales.spike_invoice,InsertQuerySpec<sales.spike_invoice,'a>> * 'bCandidates: - member InsertBuilder.Entity: state: QuerySource<'T> * value: #SqlHydra.IWriteOf<'T> -> QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>> - member InsertBuilder.Entity: state: QuerySource<'T> * value: 'T -> QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>>
+############ probes/A04_insert_unannotated_parameter.fs
+  probes/A04_insert_unannotated_parameter.fs(8,9): error FS0041: A unique overload for method 'Entity' could not be determined based on type information prior to this program point. A type annotation may be needed.Known types of arguments: QuerySource<sales.spike_invoice,InsertQuerySpec<sales.spike_invoice,'a>> * 'bCandidates: - member InsertBuilder.Entity: state: QuerySource<'T> * value: #SqlHydra.IWriteOf<'T> -> QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>> - member InsertBuilder.Entity: state: QuerySource<'T> * value: 'T -> QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>>
+############ probes/A05_self_iwriteof_ambiguous.fs
+  probes/A05_self_iwriteof_ambiguous.fs(8,9): error FS0041: A unique overload for method 'Entity' could not be determined based on type information prior to this program point. A type annotation may be needed.Known types of arguments: QuerySource<sales.selfwrite,InsertQuerySpec<sales.selfwrite,'a>> * sales.selfwriteCandidates: - member InsertBuilder.Entity: state: QuerySource<'T> * value: #SqlHydra.IWriteOf<'T> -> QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>> - member InsertBuilder.Entity: state: QuerySource<'T> * value: 'T -> QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>>
+############ probes/A06_write_literal_names_readonly_field.fs
+  probes/A06_write_literal_names_readonly_field.fs(4,64): error FS1129: The record type 'sales.spike_invoice_write' does not contain a label 'tax'.
+############ probes/A07_write_record_of_other_table.fs
+  probes/A07_write_record_of_other_table.fs(8,9): error FS0041: No overloads match for method 'Entity'.Known types of arguments: QuerySource<sales.spike_invoice,InsertQuerySpec<sales.spike_invoice,'a>> * sales.other_writeAvailable overloads: - member InsertBuilder.Entity: state: QuerySource<'T> * value: #SqlHydra.IWriteOf<'T> -> QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>> // Argument 'value' doesn't match - member InsertBuilder.Entity: state: QuerySource<'T> * value: 'T -> QuerySource<'T,InsertQuerySpec<'T,'InsertReturn>> // Argument 'value' doesn't match
+############ probes/A08_update_write_entity_where_read.fs
+  COMPILES
+############ probes/A09_insert_entities_write.fs
+  COMPILES
+############ probes/A10_insert_annotated_literal.fs
+  COMPILES
+############ probes/A11_set_readonly_column.fs
+  COMPILES
+############ probes/A12_plain_table_read_entity.fs
+  COMPILES
+############ probes/A13_getId_with_write_entity.fs
+  COMPILES
+############ probes/A14_onConflict_doUpdate_readonly_with_write_entity.fs
+  COMPILES
+############ probes/A15_includeColumn_readonly_with_write_entity.fs
+  COMPILES
+############ probes/A16_read_record_copy_into_write.fs
+  probes/A16_read_record_copy_into_write.fs(8,19): error FS0001: This expression was expected to have type    'sales.spike_invoice_write'    but here has type    'sales.spike_invoice'
+############ probes/A17_write_literal_labels_in_scope.fs
+  COMPILES

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Probe</AssemblyName>
+    <BaseOutputPath>obj-probe/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath>obj-probe/o/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Support.fs" />
+    <Compile Include="Schema.fs" />
+    <Compile Include="$(Probe)" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="9.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SqlHydra.Query\SqlHydra.Query.fsproj" />
+    <ProjectReference Include="..\SqlHydra.Domain\SqlHydra.Domain.fsproj" />
+  </ItemGroup>
+</Project>

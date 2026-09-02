@@ -89,7 +89,8 @@ type PendingConflictTarget =
 type InsertQuerySpec<'T, 'Identity> =
     {
         Table: string
-        Entities: 'T list
+        /// Boxed: a `'T` row, or an `IWriteOf<'T>` row holding only the writable columns.
+        Entities: obj list
         Fields: string list
         IdentityField: string option
         OutputFields: OutputField list
@@ -110,7 +111,8 @@ type InsertQuerySpec<'T, 'Identity> =
 type UpdateQuerySpec<'T, 'UpdateReturn> =
     {
         Table: string
-        Entity: 'T option
+        /// Boxed: a `'T` row, or an `IWriteOf<'T>` row holding only the writable columns.
+        Entity: obj option
         Fields: string list
         SetValues: (string * obj) list
         RawSetValues: (string * string * obj[]) list
@@ -121,7 +123,7 @@ type UpdateQuerySpec<'T, 'UpdateReturn> =
         CommandOptions: CommandOptions
     }
     static member Default : UpdateQuerySpec<'T, 'UpdateReturn> =
-        { Table = ""; Entity = Option<'T>.None; Fields = []; SetValues = []; RawSetValues = []
+        { Table = ""; Entity = None; Fields = []; SetValues = []; RawSetValues = []
           Where = WhereClause.Empty; OutputFields = []; UpdateAll = false; Returning = []
           CommandOptions = CommandOptions.Default }
 
@@ -234,20 +236,20 @@ module internal QueryUtils =
             else Set.empty))
 
     let fromUpdate (spec: UpdateQuerySpec<'T, 'UpdateReturn>) : UpdateQueryIR =
-        let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
-
         let kvps =
             match spec.Entity, spec.SetValues with
             | Some entity, [] ->
+                let entityType = entity.GetType()
                 let properties =
                     match spec.Fields with
                     | [] ->
-                        FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                        FSharp.Reflection.FSharpType.GetRecordFields(entityType)
                     | fields ->
                         let included = fields |> Set.ofList
-                        FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                        FSharp.Reflection.FSharpType.GetRecordFields(entityType)
                         |> Array.filter (fun p -> included.Contains(p.Name))
 
+                let readOnlyColumns = getReadOnlyColumnNames entityType
                 properties
                 |> Array.filter (fun p -> not (readOnlyColumns.Contains p.Name))
                 |> Array.map (fun p -> p.Name, getQueryParameterForEntity entity p)
@@ -257,6 +259,7 @@ module internal QueryUtils =
             | None, [] when spec.RawSetValues.IsEmpty ->
                 failwith "Either an `entity`, `set`, or `setRaw` operation must be present in an `update` expression."
             | None, setValues ->
+                let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
                 match setValues |> List.tryFind (fun (col, _) -> readOnlyColumns.Contains col) with
                 | Some (col, _) ->
                     failwithf
@@ -275,15 +278,19 @@ module internal QueryUtils =
         }
 
     let fromInsert (spec: InsertQuerySpec<'T, 'InsertReturn>) : InsertQueryIR =
-        let readOnlyColumns = getReadOnlyColumnNames typeof<'T>
+        let rowType =
+            match spec.Entities with
+            | [] -> typeof<'T>
+            | firstEntity :: _ -> firstEntity.GetType()
+        let readOnlyColumns = getReadOnlyColumnNames rowType
 
         let includedProperties =
             match spec.Fields with
             | [] ->
-                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                FSharp.Reflection.FSharpType.GetRecordFields(rowType)
             | fields ->
                 let included = fields |> Set.ofList
-                FSharp.Reflection.FSharpType.GetRecordFields(typeof<'T>)
+                FSharp.Reflection.FSharpType.GetRecordFields(rowType)
                 |> Array.filter (fun p -> included.Contains(p.Name))
             |> Array.filter (fun p -> not (readOnlyColumns.Contains p.Name))
 

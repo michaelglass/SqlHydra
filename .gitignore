@@ -54,3 +54,4 @@ Desktop.ini
 **/Verify/*.received.*
 # Claude Code personal settings
 .claude/settings.local.json
+src/Spike.WriteRecord/obj-probe/

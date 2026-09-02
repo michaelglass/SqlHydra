@@ -1,0 +1,74 @@
+========== 0. What the spec carries at runtime ==========
+         entity writeRow -> spec.Entities.Head : spike_invoice_write
+         entity readRow  -> spec.Entities.Head : spike_invoice
+         [<ReadOnlyColumn>] fields on the write record: 0
+========== 1. INSERT via the write record: column list is the write record's fields ==========
+         SQL: INSERT INTO "sales"."spike_invoice" ("price", "code") VALUES (@p0, @p1)
+         rows inserted = 1
+  [ok]   insert entity writeRow
+========== 2. Read back as the read record: every generated column hydrates, including the NULLable one ==========
+         SQL: SELECT "i".* FROM "sales"."spike_invoice" AS "i" ORDER BY "i"."id"
+         row type = spike_invoice
+         id=1 price=10 code=abc tax=1.0 label=abc-gen dear=true disc=Some 0.50M
+  [ok]   select i
+========== 3. UPDATE via the write record, filtered on the read record ==========
+         SQL: UPDATE "sales"."spike_invoice" SET "price" = @p0, "code" = @p1 WHERE ("sales"."spike_invoice"."code" = @p2)
+         rows updated = 1
+  [ok]   update entity writeRow where i.code
+========== 4. Read again: the database recomputed the generated columns ==========
+         SQL: SELECT "i".* FROM "sales"."spike_invoice" AS "i" ORDER BY "i"."id"
+         id=1 price=33 code=abc tax=3.3 label=abc-gen dear=true disc=Some 1.65M
+  [ok]   select i
+========== 5. The read-record path is unchanged: `entity readRow` still relies on the runtime filter ==========
+         SQL: INSERT INTO "sales"."spike_invoice" ("price", "code") VALUES (@p0, @p1)
+         rows inserted = 1
+  [ok]   insert entity readRow (id=999, tax=999 never sent)
+========== 6. `set` on a read-only column: the accepted escape hatch, still caught at runtime ==========
+  [ok]   set i.tax 5m -> rejected: Exception: Cannot `set` read-only column 'tax': the database generates its value and rejects an UPDATE that names it. Remove the `set` — an `entity` update skips read-only columns for you — or `setRaw` it to DEFAULT, the one value the database accepts.
+========== 7. includeColumn / excludeColumn selectors are read-typed; they intersect with the write record ==========
+         INSERT INTO "sales"."spike_invoice" () VALUES ()
+  [ok]   includeColumn i.tax with entity writeRow -> SQL
+         INSERT INTO "sales"."spike_invoice" ("price") VALUES (@p0)
+  [ok]   includeColumn i.price with entity writeRow -> SQL
+         INSERT INTO "sales"."spike_invoice" ("price") VALUES (@p0)
+  [ok]   excludeColumn i.code with entity writeRow -> SQL
+========== 8. getId with the write record: RETURNING reads the read-only identity ==========
+         SQL: INSERT INTO "sales"."spike_invoice" ("price", "code") VALUES (@p0, @p1) RETURNING "id";
+         returned id = 3
+  [ok]   getId i.id
+========== 9. onConflict/doUpdate selectors are read-typed: a read-only column can reach a SET clause ==========
+         INSERT INTO "sales"."spike_invoice" ("price", "code") VALUES (@p0, @p1)
+ON CONFLICT(code) DO UPDATE SET
+tax=EXCLUDED."tax"
+;
+  [ok]   doUpdate i.tax -> SQL
+         SQL: INSERT INTO "sales"."spike_invoice" ("price", "code") VALUES (@p0, @p1)
+ON CONFLICT(code) DO UPDATE SET
+tax=EXCLUDED."tax"
+;
+  [ok]   doUpdate i.tax executed -> rejected: PostgresException: 428C9: column "tax" can only be updated to DEFAULT  DETAIL: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.
+         SQL: INSERT INTO "sales"."spike_invoice" ("price", "code") VALUES (@p0, @p1)
+ON CONFLICT(code) DO UPDATE SET
+price=EXCLUDED."price"
+;
+         rows = 1
+         SQL: SELECT "i".* FROM "sales"."spike_invoice" AS "i" ORDER BY "i"."id"
+         id=1 price=44 code=abc tax=4.4 label=abc-gen dear=true disc=Some 2.20M
+  [ok]   doUpdate i.price executed (the proper upsert)
+========== 10. entities with a list of write records ==========
+         INSERT INTO "sales"."spike_invoice" ("price", "code") VALUES (@p0, @p1), (@p2, @p3)
+         SQL: INSERT INTO "sales"."spike_invoice" ("price", "code") VALUES (@p0, @p1), (@p2, @p3)
+         rows inserted = 2
+  [ok]   entities [w1; w2]
+========== 11. update entity writeRow narrowed by includeColumn ==========
+         UPDATE "sales"."spike_invoice" SET "price" = @p0 WHERE ("sales"."spike_invoice"."code" = @p1)
+  [ok]   includeColumn i.price -> SQL
+========== 12. Final state ==========
+         SQL: SELECT "i".* FROM "sales"."spike_invoice" AS "i" ORDER BY "i"."id"
+         id=1 price=44 code=abc tax=4.4 label=abc-gen dear=true disc=Some 2.20M
+         id=2 price=10 code=via-read tax=1.0 label=via-read-gen dear=true disc=Some 0.50M
+         id=3 price=10 code=with-id tax=1.0 label=with-id-gen dear=true disc=Some 0.50M
+         id=5 price=10 code=m1 tax=1.0 label=m1-gen dear=true disc=Some 0.50M
+         id=6 price=10 code=m2 tax=1.0 label=m2-gen dear=true disc=Some 0.50M
+  [ok]   select i
+done.
