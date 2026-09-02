@@ -62,7 +62,7 @@ type SqlFn =
     static member EOMONTH(date: DateTime, months: int) : DateTime = sqlFn
 
 /// SQL Server specific extensions for the insert builder.
-type InsertBuilder<'Inserted, 'InsertReturn> with
+type InsertBuilder<'Inserted, 'InsertReturn, 'Write when 'Write :> SqlHydra.IWriteOf<'Inserted>> with
 
     /// Performs an insert-first upsert. On duplicate key (PK/UNIQUE violation), updates the specified columns.
     [<CustomOperation("insertOrUpdateOnUnique", MaintainsVariableSpace = true)>]

@@ -81,7 +81,7 @@ type PgSqlFn =
     /// Example: `interval "7 days"` → `INTERVAL '7 days'`
     static member interval(value: string) : TimeSpan = sqlFn
 
-type InsertBuilder<'Inserted, 'InsertReturn> with
+type InsertBuilder<'Inserted, 'InsertReturn, 'Write when 'Write :> SqlHydra.IWriteOf<'Inserted>> with
     
     /// Performs an update on one or more update fields if a conflict occurs.
     [<CustomOperation("onConflictDoUpdate", MaintainsVariableSpace = true)>]
@@ -218,8 +218,8 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
 
     /// Conflict action: DO UPDATE SET col=EXCLUDED.col, selecting over the write record so a read-only column cannot be named.
     [<CustomOperation("doUpdateWrite", MaintainsVariableSpace = true)>]
-    member this.DoUpdateWrite<'T, 'InsertReturn, 'Write, 'UpdateProperties when 'Write :> SqlHydra.IWriteOf<'T>>(
-        state: QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>,
+    member this.DoUpdateWrite<'UpdateProperties>(
+        state: QuerySource<'Inserted, InsertQuerySpec<'Inserted, 'InsertReturn>>,
         updateFields: System.Linq.Expressions.Expression<Func<'Write, 'UpdateProperties>>) =
         let spec = state.Query
         let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'Write, 'UpdateProperties> updateFields (fun _ p -> p.Name)
@@ -229,7 +229,7 @@ type InsertBuilder<'Inserted, 'InsertReturn> with
             | Some (TypedConflictColumns _) -> failwith "doUpdateWrite does not currently support a partial-index WHERE clause"
             | Some (RawConflictTarget _) -> failwith "doUpdateWrite requires a typed conflict target (use onConflict, not onConflictRaw)"
             | None -> failwith "doUpdateWrite requires onConflict to be called first"
-        QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
+        QuerySource<'Inserted, InsertQuerySpec<'Inserted, 'InsertReturn>>(
             { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields); PendingConflict = None },
             state.TableMappings)
 

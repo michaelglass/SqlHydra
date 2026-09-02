@@ -1,0 +1,3 @@
+generic test-module methods: 2
+  Oracle.Query Integration Tests+verifyAggregateValuesFor@104.Specialize<a>
+  Npgsql.Query Integration Tests+verifyAggregateValuesFor@110.Specialize<a>

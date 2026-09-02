@@ -60,7 +60,7 @@ type SqlFn =
     // Type functions
     static member typeof'(value: 'T) : string = sqlFn
 
-type InsertBuilder<'Inserted, 'InsertReturn> with
+type InsertBuilder<'Inserted, 'InsertReturn, 'Write when 'Write :> SqlHydra.IWriteOf<'Inserted>> with
 
     /// Performs an update on one or more update fields if a conflict occurs.
     [<CustomOperation("onConflictDoUpdate", MaintainsVariableSpace = true)>]

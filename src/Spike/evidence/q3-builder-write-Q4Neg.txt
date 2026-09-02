@@ -1,0 +1,2 @@
+    1 Error(s)
+src/Spike/Q4Neg.fs(11,58): error FS0039: The type 'invoice_write' does not define a field, constructor, or member named 'tax'.
