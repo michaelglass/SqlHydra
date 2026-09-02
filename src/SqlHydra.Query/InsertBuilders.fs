@@ -1,4 +1,4 @@
-/// Linq insert query builders
+﻿/// Linq insert query builders
 [<AutoOpen>]
 module SqlHydra.Query.InsertBuilders
 
@@ -46,8 +46,8 @@ type InsertBuilder<'Inserted, 'InsertReturn>() =
             , state.TableMappings)
 
     /// Sets a single value for INSERT from the table's write record, which has no field for a read-only column.
-    [<CustomOperation("entity", MaintainsVariableSpace = true)>]
-    member this.Entity<'T, 'Write when 'Write :> SqlHydra.IWriteOf<'T>> (state:QuerySource<'T>, value: 'Write) = 
+    [<CustomOperation("writeEntity", MaintainsVariableSpace = true)>]
+    member this.WriteEntity<'T, 'Write when 'Write :> SqlHydra.IWriteOf<'T>> (state:QuerySource<'T>, value: 'Write) = 
         let spec = state |> getQueryOrDefault
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
             { spec with Entities = [ box value ] }
@@ -70,8 +70,8 @@ type InsertBuilder<'Inserted, 'InsertReturn>() =
             , state.TableMappings)
 
     /// Sets multiple values for INSERT from the table's write record. (Should have at least one value.)
-    [<CustomOperation("entities", MaintainsVariableSpace = true)>]
-    member this.Entities<'T, 'Write when 'Write :> SqlHydra.IWriteOf<'T>> (state:QuerySource<'T>, entities: 'Write seq) = 
+    [<CustomOperation("writeEntities", MaintainsVariableSpace = true)>]
+    member this.WriteEntities<'T, 'Write when 'Write :> SqlHydra.IWriteOf<'T>> (state:QuerySource<'T>, entities: 'Write seq) = 
         let spec = state |> getQueryOrDefault
         QuerySource<'T, InsertQuerySpec<'T, 'InsertReturn>>(
             { spec with Entities = entities |> Seq.map box |> Seq.toList }

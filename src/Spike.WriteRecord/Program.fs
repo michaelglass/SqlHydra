@@ -44,9 +44,9 @@ let updateSql (q: UpdateQuery<_, _>) = (emitter.EmitUpdate q.IR).Sql
 [<EntryPoint>]
 let main _ =
     hdr "0. What the spec carries at runtime"
-    let viaWrite = insert { into invoices; entity writeRow }
+    let viaWrite = insert { into invoices; writeEntity writeRow }
     let viaRead = insert { into invoices; entity readRow }
-    printfn "         entity writeRow -> spec.Entities.Head : %s" (viaWrite.Spec.Entities.Head.GetType().Name)
+    printfn "         writeEntity writeRow -> spec.Entities.Head : %s" (viaWrite.Spec.Entities.Head.GetType().Name)
     printfn "         entity readRow  -> spec.Entities.Head : %s" (viaRead.Spec.Entities.Head.GetType().Name)
     printfn "         [<ReadOnlyColumn>] fields on the write record: %d" (
         FSharp.Reflection.FSharpType.GetRecordFields(typeof<sales.spike_invoice_write>)
@@ -57,7 +57,7 @@ let main _ =
     exec ctx ddl
 
     hdr "1. INSERT via the write record: column list is the write record's fields"
-    tryIt "insert entity writeRow" (fun () ->
+    tryIt "insert writeEntity writeRow" (fun () ->
         let n = viaWrite |> ctx.Insert
         printfn "         rows inserted = %d" n)
 
@@ -68,11 +68,11 @@ let main _ =
         rows |> List.iter showRow)
 
     hdr "3. UPDATE via the write record, filtered on the read record"
-    tryIt "update entity writeRow where i.code" (fun () ->
+    tryIt "update writeEntity writeRow where i.code" (fun () ->
         let n =
             update {
                 for i in invoices do
-                entity { writeRow with price = 33m }
+                writeEntity { writeRow with price = 33m }
                 where (i.code = "abc")
             }
             |> ctx.Update
@@ -97,27 +97,27 @@ let main _ =
         |> ignore)
 
     hdr "7. includeColumn / excludeColumn selectors are read-typed; they intersect with the write record"
-    tryIt "includeColumn i.tax with entity writeRow -> SQL" (fun () ->
+    tryIt "includeColumn i.tax with writeEntity writeRow -> SQL" (fun () ->
         let q =
             insert {
                 for i in invoices do
-                entity writeRow
+                writeEntity writeRow
                 includeColumn i.tax
             }
         printfn "         %s" (insertSql q))
-    tryIt "includeColumn i.price with entity writeRow -> SQL" (fun () ->
+    tryIt "includeColumn i.price with writeEntity writeRow -> SQL" (fun () ->
         let q =
             insert {
                 for i in invoices do
-                entity writeRow
+                writeEntity writeRow
                 includeColumn i.price
             }
         printfn "         %s" (insertSql q))
-    tryIt "excludeColumn i.code with entity writeRow -> SQL" (fun () ->
+    tryIt "excludeColumn i.code with writeEntity writeRow -> SQL" (fun () ->
         let q =
             insert {
                 for i in invoices do
-                entity writeRow
+                writeEntity writeRow
                 excludeColumn i.code
             }
         printfn "         %s" (insertSql q))
@@ -127,7 +127,7 @@ let main _ =
         let id =
             insert {
                 for i in invoices do
-                entity { writeRow with code = "with-id" }
+                writeEntity { writeRow with code = "with-id" }
                 getId i.id
             }
             |> ctx.Insert
@@ -137,7 +137,7 @@ let main _ =
     let upsertTax =
         insert {
             for i in invoices do
-            entity writeRow
+            writeEntity writeRow
             onConflict i.code
             doUpdate i.tax
         }
@@ -147,7 +147,7 @@ let main _ =
         let n =
             insert {
                 for i in invoices do
-                entity { writeRow with price = 44m }
+                writeEntity { writeRow with price = 44m }
                 onConflict i.code
                 doUpdate i.price
             }
@@ -160,17 +160,17 @@ let main _ =
         let q =
             insert {
                 into invoices
-                entities [ { writeRow with code = "m1" }; { writeRow with code = "m2" } ]
+                writeEntities [ { writeRow with code = "m1" }; { writeRow with code = "m2"; price = 20m } ]
             }
         printfn "         %s" (insertSql q)
         printfn "         rows inserted = %d" (ctx.Insert q))
 
-    hdr "11. update entity writeRow narrowed by includeColumn"
+    hdr "11. update writeEntity writeRow narrowed by includeColumn"
     tryIt "includeColumn i.price -> SQL" (fun () ->
         let q =
             update {
                 for i in invoices do
-                entity { writeRow with price = 1m }
+                writeEntity { writeRow with price = 1m }
                 includeColumn i.price
                 where (i.code = "m1")
             }

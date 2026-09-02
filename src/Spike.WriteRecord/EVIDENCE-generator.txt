@@ -1,0 +1,50 @@
+### dotnet test --filter FullyQualifiedName~SchemaTemplateTests.Spike (net10.0)
+  Passed Spike: a relation where every column is read-only gets no write record (open question) [57 ms]
+  Passed Spike: a table with no read-only columns gets no write record [< 1 ms]
+  Passed Spike: a table with read-only columns gets a write record holding the other columns [5 ms]
+
+### emitted for sales.invoice (id, tax read-only):
+module sales =
+
+    [<CLIMutable>]
+    type invoice =
+        {
+            [<ReadOnlyColumn>]
+            id: int
+            price: decimal
+            code: string
+            [<ReadOnlyColumn>]
+            tax: decimal
+        }
+    
+    /// The columns of `invoice` a caller may write; the database owns the rest.
+    [<CLIMutable>]
+    type invoice_write =
+        {
+            price: decimal
+            code: string
+        }
+        interface IWriteOf<invoice>
+    
+### emitted for sales.plain (no read-only columns):
+module sales =
+
+    [<CLIMutable>]
+    type plain =
+        {
+            id: int
+            name: string
+        }
+    
+### emitted for sales.all_generated (every column read-only):
+module sales =
+
+    [<CLIMutable>]
+    type all_generated =
+        {
+            [<ReadOnlyColumn>]
+            id: int
+            [<ReadOnlyColumn>]
+            stamp: System.DateTime
+        }
+    

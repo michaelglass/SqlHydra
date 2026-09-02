@@ -1,0 +1,2 @@
+############ probes/Z01_empty_write_record.fs
+  probes/Z01_empty_write_record.fs(5,7): error FS3863: Expecting record field

@@ -1,0 +1,35 @@
+############ probes/B01_insert_writeEntity.fs
+  COMPILES
+############ probes/B02_insert_read_entity.fs
+  COMPILES
+############ probes/B03_entity_unannotated_literal.fs
+  COMPILES
+############ probes/B04_entity_unannotated_parameter.fs
+  COMPILES
+############ probes/B05_self_iwriteof_both_keywords.fs
+  COMPILES
+############ probes/B06_write_literal_names_readonly_field.fs
+  probes/B06_write_literal_names_readonly_field.fs(4,64): error FS1129: The record type 'sales.spike_invoice_write' does not contain a label 'tax'.
+############ probes/B07_write_record_of_other_table.fs
+  probes/B07_write_record_of_other_table.fs(8,21): error FS0001: The type 'sales.other_write' is not compatible with the type 'SqlHydra.IWriteOf<sales.spike_invoice>'
+  probes/B07_write_record_of_other_table.fs(8,9): error FS0001: The type 'sales.other_write' is not compatible with the type 'SqlHydra.IWriteOf<sales.spike_invoice>'
+############ probes/B08_update_writeEntity_where_read.fs
+  COMPILES
+############ probes/B09_insert_writeEntities.fs
+  COMPILES
+############ probes/B10_writeEntity_unannotated_literal_no_labels.fs
+  probes/B10_writeEntity_unannotated_literal_no_labels.fs(8,23): error FS0039: The record label 'price' is not defined.
+  probes/B10_writeEntity_unannotated_literal_no_labels.fs(8,36): error FS0039: The record label 'code' is not defined.
+############ probes/B11_writeEntity_literal_labels_in_scope_write_declared_after.fs
+  COMPILES
+############ probes/B12_writeEntity_literal_labels_in_scope_write_declared_before.fs
+  COMPILES
+############ probes/B13_writeEntity_given_read_record.fs
+  probes/B13_writeEntity_given_read_record.fs(7,21): error FS0001: The type 'sales.spike_invoice' is not compatible with the type 'SqlHydra.IWriteOf<sales.spike_invoice>'
+  probes/B13_writeEntity_given_read_record.fs(7,9): error FS0001: The type 'sales.spike_invoice' is not compatible with the type 'SqlHydra.IWriteOf<sales.spike_invoice>'
+############ probes/B14_entity_given_write_record.fs
+  probes/B14_entity_given_write_record.fs(7,16): error FS0001: This expression was expected to have type    'sales.spike_invoice'    but here has type    'sales.spike_invoice_write'
+############ probes/B15_getId_with_writeEntity.fs
+  COMPILES
+############ probes/B16_writeEntity_literal_decoy_label_declared_later.fs
+  COMPILES
