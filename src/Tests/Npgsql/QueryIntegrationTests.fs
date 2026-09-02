@@ -983,3 +983,65 @@ let ``writeEntity: a nullable generated column reads back as Some where the data
 
     do! WriteRecordFixture.exec ctx WriteRecordFixture.dropDdl
 }
+
+// Spike: `doUpdateWrite` end to end on a table whose conflict column is unique.
+
+module DoUpdateWriteFixture =
+    module sales =
+        [<CLIMutable>]
+        type sqlhydra_do_update_write =
+            { id: int
+              code: string
+              price: decimal
+              tax: decimal }
+
+        and [<CLIMutable>] sqlhydra_do_update_write_write =
+            { code: string
+              price: decimal }
+            interface SqlHydra.IWriteOf<sqlhydra_do_update_write>
+
+    let rows = table<sales.sqlhydra_do_update_write>
+
+    let ddl =
+        """
+        DROP TABLE IF EXISTS sales.sqlhydra_do_update_write;
+        CREATE TABLE sales.sqlhydra_do_update_write (
+            id    int GENERATED ALWAYS AS IDENTITY,
+            code  text NOT NULL UNIQUE,
+            price numeric NOT NULL,
+            tax   numeric GENERATED ALWAYS AS (price * 0.1) STORED
+        );
+        """
+
+    let dropDdl = "DROP TABLE sales.sqlhydra_do_update_write;"
+
+[<Test>]
+let ``doUpdateWrite: the upsert names only the write record's fields, and the conflicting row is updated``() = task {
+    let sqlLog = ResizeArray<string>()
+    use! ctx = db.OpenContextAsync()
+    ctx.Logger <- fun compiled -> sqlLog.Add compiled.Sql
+    do! WriteRecordFixture.exec ctx DoUpdateWriteFixture.ddl
+
+    let upsert (price: decimal) =
+        insertTask ctx {
+            for r in DoUpdateWriteFixture.rows do
+            writeEntity ({ code = "a"; price = price } : DoUpdateWriteFixture.sales.sqlhydra_do_update_write_write)
+            onConflict r.code
+            doUpdateWrite (fun w -> w.price)
+        }
+    let! inserted = upsert 10m
+    let! updated = upsert 25m
+    inserted =! 1
+    updated =! 1
+    let sql = System.Text.RegularExpressions.Regex.Replace(sqlLog |> Seq.distinct |> Seq.exactlyOne, @"\s+", " ").Trim()
+    printfn "doUpdateWrite SQL: %s" sql
+    sql =! """INSERT INTO "sales"."sqlhydra_do_update_write" ("code", "price") VALUES (@p0, @p1) ON CONFLICT(code) DO UPDATE SET price=EXCLUDED."price" ;"""
+
+    let! rows = selectTask ctx { for r in DoUpdateWriteFixture.rows do select r }
+    let row = rows |> Seq.exactlyOne
+    row.id =! 1
+    row.price =! 25m
+    row.tax =! 2.5m
+
+    do! WriteRecordFixture.exec ctx DoUpdateWriteFixture.dropDdl
+}

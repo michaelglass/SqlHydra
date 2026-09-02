@@ -216,6 +216,18 @@ type InsertBuilder<'Inserted, 'InsertReturn, 'Write when 'Write :> SqlHydra.IWri
             { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields); PendingConflict = None },
             state.TableMappings)
 
+    /// Q5 shape probe: a projection over the read record and a lambda over the write record in one member.
+    [<CustomOperation("onConflictDoUpdateWrite", MaintainsVariableSpace = true)>]
+    member this.OnConflictDoUpdateWrite<'ConflictProperty, 'UpdateProperties>(
+        state: QuerySource<'Inserted, InsertQuerySpec<'Inserted, 'InsertReturn>>,
+        [<ProjectionParameter>] conflictFields: System.Linq.Expressions.Expression<Func<'Inserted, 'ConflictProperty>>,
+        updateFields: System.Linq.Expressions.Expression<Func<'Write, 'UpdateProperties>>) =
+        let spec = state.Query
+        let conflictFields = LinqExpressionVisitors.visitPropertiesSelector<'Inserted, 'ConflictProperty> conflictFields (fun _ p -> p.Name)
+        let updateFields = LinqExpressionVisitors.visitPropertiesSelector<'Write, 'UpdateProperties> updateFields (fun _ p -> p.Name)
+        QuerySource<'Inserted, InsertQuerySpec<'Inserted, 'InsertReturn>>(
+            { spec with InsertType = OnConflictDoUpdate (conflictFields, updateFields) }, state.TableMappings)
+
     /// Conflict action: DO UPDATE SET col=EXCLUDED.col, selecting over the write record so a read-only column cannot be named.
     [<CustomOperation("doUpdateWrite", MaintainsVariableSpace = true)>]
     member this.DoUpdateWrite<'UpdateProperties>(

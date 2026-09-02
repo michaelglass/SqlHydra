@@ -1,0 +1,2 @@
+doUpdateWrite SQL: INSERT INTO "sales"."sqlhydra_do_update_write" ("code", "price") VALUES (@p0, @p1) ON CONFLICT(code) DO UPDATE SET price=EXCLUDED."price" ;
+Passed!  - Failed:     0, Passed:     1, Skipped:     0, Total:     1, Duration: 213 ms - Tests.dll (net8.0)
