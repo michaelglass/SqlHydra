@@ -1721,3 +1721,16 @@ let ``two ordinary .NET calls in a where are evaluated, not rendered``() =
         |> ignore
     let ex = Assert.Throws<NotImplementedException>(fun () -> build ())
     test <@ ex.Message.Contains("Value to value") @>
+
+[<Test>]
+let ``an aggregate compared to None in a having emits IS NULL``() =
+    // `= @p0` with a NULL parameter matches no group.
+    let sql =
+        select {
+            for a in person.address do
+            groupBy a.city
+            having (maxBy a.addressline2 = None)
+            select (a.city, maxBy a.addressline2)
+        }
+        |> toSql
+    test <@ sql.Contains("HAVING (MAX(a.addressline2) IS NULL)") @>
