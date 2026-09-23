@@ -1334,6 +1334,32 @@ let ``cteFrom produces a WITH clause and FROM alias``() =
     sql.Contains("WITH \"recent_addrs\" AS (") =! true
     sql.Contains("FROM \"recent_addrs\" AS \"r\"") =! true
 
+[<TestCase "join'">]
+[<TestCase "leftJoin'">]
+let ``A cteFrom on the inner side of a predicate join keeps its WITH clause``(joinOp: string) =
+    let recent =
+        cteFrom<person.address> "recent_addrs" (
+            select {
+                for a in person.address do
+                where (a.city = "Dallas")
+            })
+    let sql =
+        if joinOp = "join'" then
+            select {
+                for e in person.businessentityaddress do
+                join' r in recent; on' (e.addressid = r.addressid)
+                select e.businessentityid
+            }
+            |> toSql
+        else
+            select {
+                for e in person.businessentityaddress do
+                leftJoin' r in recent; on' (e.addressid = r.Value.addressid)
+                select e.businessentityid
+            }
+            |> toSql
+    sql.Contains("WITH \"recent_addrs\" AS (") =! true
+
 [<Test>]
 let ``inlineValue emits a SQL literal not a parameter``() =
     // inlineValue forces a captured value to be emitted as an inline SQL literal,
