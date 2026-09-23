@@ -454,6 +454,11 @@ let private stateProvinceMatView filters =
     generated filters |> List.find (fun tbl -> tbl.Schema = "person" && tbl.Name = "vstateprovincecountryregion")
 
 [<Test>]
+let ``Every column of a composite primary key is marked``() =
+    let tbl = generated { Filters.Empty with Includes = [ "person/businessentityaddress" ] } |> List.exactlyOne
+    set [ for col in tbl.Columns do if col.IsPK then col.Name ] =! set [ "businessentityid"; "addressid"; "addresstypeid" ]
+
+[<Test>]
 let ``Table filters exclude materialized views``() =
     // AdventureWorks has two: person/vstateprovincecountryregion and production/vproductanddescription.
     generatedPaths { Filters.Empty with Includes = [ "person/address" ] } =! [ "person/address" ]
