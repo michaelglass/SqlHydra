@@ -554,6 +554,35 @@ type SelectBuilder<'Selected, 'Mapped> () =
         this.PendingJoinInfo <- Some pendingJoin
         QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
 
+    /// LEFT JOIN a generated left-view (`Schema.LeftJoined.tbl`) with a predicate-style
+    /// `on'` clause. Because `on'` sees the post-join variable space, the joined row is
+    /// already the 'View record (every column nullable), so lift the outer column:
+    /// Example: `leftJoin' d in Sales.LeftJoined.Detail; on' (Some o.Id = d.Id && d.Qty > Some 5s)`
+    [<CustomOperation("leftJoin'", MaintainsVariableSpace = true, IsLikeZip = true)>]
+    member this.LeftJoin' (outerSource: QuerySource<'Outer>,
+                            innerSource: LeftViewQuerySource<'Table, 'View>,
+                            resultSelector: Expression<Func<'Outer, 'View, 'JoinResult>>) =
+        let innerAlias =
+            match resultSelector.Parameters |> Seq.toList with
+            | [_; inner] -> inner.Name
+            | _ -> failwith "Expected two parameters in leftJoin result selector"
+
+        let _, innerTableMappings = TableMappings.tryGetByRootOrAlias innerAlias innerSource.TableMappings
+        let mergedTables = mergeTableMappings (outerSource.TableMappings, innerTableMappings)
+
+        let innerTable = mergedTables[TableAliasKey innerAlias]
+        let tableName = FQ.qualifiedTable innerTable
+
+        let pendingJoin = {
+            JoinType = JoinType.Left
+            TableName = tableName
+            TableAlias = innerAlias
+        }
+
+        let ir = outerSource |> getQueryOrDefault
+        this.PendingJoinInfo <- Some pendingJoin
+        QuerySource<'JoinResult, SelectQueryIR>(ir, mergedTables)
+
     /// Completes a pending join with a predicate expression.
     /// Used after `join'` or `leftJoin'` to specify the join condition.
     /// Example: `on' (o.Id = d.Id && d.Type = "X")`

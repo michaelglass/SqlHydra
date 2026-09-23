@@ -1400,6 +1400,14 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
         | NProperty (p, ext) when tables |> Seq.exists (fun tbl -> tbl.IsInTable p) -> Some (p, ext)
         | _ -> None
 
+    /// `Some col` lifts a plain column to compare against a left-view's nullable column
+    /// (`leftJoin' d in X.LeftJoined.T; on' (Some o.Id = d.Id)`). SQL draws no such
+    /// distinction, so the operand is the column itself.
+    let stripSome (nexp: NormalizedExpression) =
+        match nexp with
+        | NMethodCall (m, [ (NColumn _) as inner ]) when m.Method.Name = "Some" -> inner
+        | _ -> nexp
+
     let rec visit (nexp: NormalizedExpression) : WhereClause =
         match nexp with
         | NBinaryAnd(left, right) ->
@@ -1413,6 +1421,7 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
         | NBinaryCompare(left, op, right) ->
             let compOp = toComparisonOp op
             let comparison = getComparison op
+            let left, right = stripSome left, stripSome right
             match left, right with
             // A SQL function must be rendered, not evaluated. These MUST precede the arms
             // below, which compile-and-eval whichever side is not a column.

@@ -317,6 +317,34 @@ let ``Left Join Left-View - anti-join via isNullValue on the witness column``() 
     sql.Contains("WHERE (\"d\".\"salesorderdetailid\" IS NULL)") =! true
 
 [<Test>]
+let ``Left Join Left-View with on' - lifted outer column, extra view-column condition``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.LeftJoined.salesorderdetail; on' (Some o.salesorderid = d.salesorderid && d.orderqty > Some 5s)
+            select (o, d)
+        }
+        |> toSql
+
+    sql =!
+        "SELECT \"o\".*, \"d\".* FROM \"sales\".\"salesorderheader\" AS \"o\" \
+        LEFT JOIN \"sales\".\"salesorderdetail\" AS \"d\" ON (\"o\".\"salesorderid\" = \"d\".\"salesorderid\" AND \"d\".\"orderqty\" > @p0)"
+
+[<Test>]
+let ``Left Join Left-View with on' - nullable columns downstream``() =
+    let sql =
+        select {
+            for o in sales.salesorderheader do
+            leftJoin' d in sales.LeftJoined.salesorderdetail; on' (Some o.salesorderid = d.salesorderid)
+            where (isNullValue d.salesorderdetailid)
+            select (o.salesorderid, d.orderqty)
+        }
+        |> toSql
+
+    sql.Contains("SELECT \"o\".\"salesorderid\", \"d\".\"orderqty\"") =! true
+    sql.Contains("WHERE (\"d\".\"salesorderdetailid\" IS NULL)") =! true
+
+[<Test>]
 let ``Correlated Subquery``() =
     let latestOrderByCustomer = 
         select {
