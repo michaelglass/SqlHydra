@@ -345,6 +345,21 @@ let ``Left Join Left-View with on' - nullable columns downstream``() =
     sql.Contains("WHERE (\"d\".\"salesorderdetailid\" IS NULL)") =! true
 
 [<Test>]
+let ``A lifted column compared to an option-returning SQL function is a column``() =
+    // `Some a.addressline1` is a column. Here `where` reaches its SQL-function arms before its
+    // column arms, so evaluating the lifted column as a value would throw.
+    let sql =
+        select {
+            for a in person.address do
+            where (SqlFn.nullif (SqlFn.upper a.city, "") = Some a.addressline1)
+            select a.addressid
+        }
+        |> toSql
+
+    // A column, not a bound value. Quoting is left out: it is #166's concern, not this one's.
+    test <@ sql.Contains "NULLIF(UPPER(" && sql.Contains "addressline1)" && not (sql.Contains "@p") @>
+
+[<Test>]
 let ``Correlated Subquery``() =
     let latestOrderByCustomer = 
         select {

@@ -437,8 +437,17 @@ module NormalizedPatterns =
     /// A constant value or an evaluable expression.
     /// Delegates to compileAndEvaluateExpression for non-constant evaluable expressions.
     let (|NValue|_|) (nexp: NormalizedExpression) =
+        let rec isQueryVariable nexp =
+            match nexp with
+            | NParameter _ -> true
+            | NMemberAccess(inner, _) -> isQueryVariable inner
+            | _ -> false
+
         match nexp with
         | NConstant(v, _) -> Some v
+        // `Some o.Col` lifts a column to compare with a left-view's option column; it is a
+        // column (see NProperty), not a value, and evaluating it would throw.
+        | NMethodCall(call, [ arg ]) when call.Method.Name = "Some" && isQueryVariable arg -> None
         | NMethodCall(call, _) when not (isSqlHydraFunction call.Method) ->
             compileAndEvaluateExpression (call :> Expression) |> Some
         | NMemberAccess(NConstant _, m) ->
@@ -1400,14 +1409,6 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
         | NProperty (p, ext) when tables |> Seq.exists (fun tbl -> tbl.IsInTable p) -> Some (p, ext)
         | _ -> None
 
-    /// `Some col` lifts a plain column to compare against a left-view's nullable column
-    /// (`leftJoin' d in X.LeftJoined.T; on' (Some o.Id = d.Id)`). SQL draws no such
-    /// distinction, so the operand is the column itself.
-    let stripSome (nexp: NormalizedExpression) =
-        match nexp with
-        | NMethodCall (m, [ (NColumn _) as inner ]) when m.Method.Name = "Some" -> inner
-        | _ -> nexp
-
     let rec visit (nexp: NormalizedExpression) : WhereClause =
         match nexp with
         | NBinaryAnd(left, right) ->
@@ -1421,7 +1422,6 @@ let visitJoinPredicate<'T> (tables: TableMapping seq) (predicate: Expression<Fun
         | NBinaryCompare(left, op, right) ->
             let compOp = toComparisonOp op
             let comparison = getComparison op
-            let left, right = stripSome left, stripSome right
             match left, right with
             // A SQL function must be rendered, not evaluated. These MUST precede the arms
             // below, which compile-and-eval whichever side is not a column.
