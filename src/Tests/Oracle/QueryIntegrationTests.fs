@@ -442,13 +442,7 @@ let ``Oracle accepts a niladic function``() = task {
 
 [<Test>]
 let ``Oracle accepts a column compared to a SQL function``() = task {
-    // `where (col < FN())` used to render the column unquoted, as `o.ORDER_DATE`. Oracle folds
-    // an unquoted name to upper case, looks for "O"."ORDER_DATE" against an alias declared as
-    // "o", and rejects the statement with:
-    //
-    //     ORA-00904: "O"."ORDER_DATE": invalid identifier
-    //
-    // The rendered-SQL twin lives in QueryUnitTests; this one proves the server accepts it.
+    // Unquoted, Oracle folds `o.ORDER_DATE` to "O"."ORDER_DATE" and fails with ORA-00904.
     let! rows =
         selectTask db {
             for o in OT.ORDERS do

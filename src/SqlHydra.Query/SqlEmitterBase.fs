@@ -22,6 +22,7 @@ type ParameterCollector(prefix: string) =
 /// Base class providing shared SQL rendering logic for all provider emitters.
 [<AbstractClass>]
 type SqlEmitterBase() =
+    static let markedIdentifier = Regex(@"\{\w+\}(?:\.\{\w+\})+", RegexOptions.Compiled)
 
     /// Quote a single identifier segment (table, column, alias).
     abstract QuoteIdentifier: string -> string
@@ -148,22 +149,11 @@ type SqlEmitterBase() =
     member this.QuoteColumn(col: string) =
         this.QuoteDotted(col)
 
-    /// Processes a raw SQL fragment, replacing dotted `{a}.{b}` / `{a}.{b}.{c}` identifier
-    /// templates with quoted identifiers. The visitors mark every column they interpolate into
-    /// a raw fragment this way, so `{alias}.{column}` (select/where/join) and
-    /// `{schema}.{table}.{column}` (delete/update) both round-trip.
-    ///
-    /// A run of two or more segments is required, so a lone `{...}` in a hand-written fragment
-    /// (`havingRaw`, `whereRawConflict`, a user-built `RawWhere`) is left alone.
+    /// Quotes the `{a}.{b}` / `{a}.{b}.{c}` identifiers the visitors mark in a raw fragment.
+    /// Two or more segments are required, so a lone `{...}` in hand-written SQL is left alone.
     member this.QuoteRawFragment(fragment: string) =
-        Regex.Replace(fragment, @"\{(\w+)\}(?:\.\{(\w+)\})+", fun m ->
-            seq {
-                yield m.Groups.[1].Value
-                for c in m.Groups.[2].Captures -> c.Value
-            }
-            |> Seq.map this.QuoteIdentifier
-            |> String.concat "."
-        )
+        if fragment.IndexOf '{' < 0 then fragment
+        else markedIdentifier.Replace(fragment, fun m -> this.QuoteDotted(m.Value.Replace("{", "").Replace("}", "")))
 
     /// Emits a SqlValue, returning the SQL fragment.
     member this.EmitValue(value: SqlValue, collector: ParameterCollector) =

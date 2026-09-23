@@ -1981,17 +1981,7 @@ let ``an aggregate compared to None in a having emits IS NULL``() =
 
 [<Test>]
 let ``a column compared to a SQL function is quoted like any other column``() =
-    // A column used to keep its quotes when compared to a value and lose them when compared to
-    // a SQL function. The value path builds a `Compare` node and the emitter runs QuoteColumn
-    // over it; the function path builds a `RawWhere`, whose fragment used to be emitted
-    // verbatim with the bare `alias.column` that `qualifyColumn` returns.
-    //
-    // The select path had already solved this: it marks identifiers as `{alias}.{column}` and
-    // the emitter expands them through `QuoteRawFragment`. The where, having and join paths
-    // now mark their columns the same way, and `RawWhere` runs the expansion too.
-    //
-    // PostgreSQL survived the unquoted form only because it folds unquoted names to lower case
-    // and AdventureWorks is lower case throughout. A mixed-case column would have failed here.
+    // The value path (a `Compare` node) and the function path (a `RawWhere`) quote alike.
     let viaValue =
         select {
             for a in person.address do
@@ -2008,17 +1998,19 @@ let ``a column compared to a SQL function is quoted like any other column``() =
     test <@ viaValue.Contains "\"a\".\"city\"" @>            // control: already correct
     test <@ viaFunction.Contains "\"a\".\"city\"" @>
 
+/// Delete and update qualify a column `schema.table.column`, one part deeper than a select.
+let private threePartWhere =
+    "WHERE (\"person\".\"address\".\"city\" < UPPER(\"person\".\"address\".\"addressline1\"))"
+
 [<Test>]
 let ``a delete qualifies a SQL-function comparison three parts deep``() =
-    // A select qualifies a column as `alias.column`; delete and update qualify it as
-    // `schema.table.column`. The marker the emitter expands has to cover both arities.
     let sql =
         delete {
             for a in person.address do
             where (a.city < SqlFn.upper a.addressline1)
         }
         |> toSql
-    test <@ sql.Contains("WHERE (\"person\".\"address\".\"city\" < UPPER(\"person\".\"address\".\"addressline1\"))") @>
+    test <@ sql.Contains threePartWhere @>
 
 [<Test>]
 let ``an update qualifies a SQL-function comparison three parts deep``() =
@@ -2029,4 +2021,4 @@ let ``an update qualifies a SQL-function comparison three parts deep``() =
             where (a.city < SqlFn.upper a.addressline1)
         }
         |> toUpdateSql
-    test <@ sql.Contains("WHERE (\"person\".\"address\".\"city\" < UPPER(\"person\".\"address\".\"addressline1\"))") @>
+    test <@ sql.Contains threePartWhere @>
