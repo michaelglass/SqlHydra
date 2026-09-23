@@ -42,7 +42,6 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
     // Error: "type {enum name} does not exist"
     // This is a Postgres issue, not a SqlHydra issue.
     let sTables = conn.GetSchema("Tables", cfg.Filters.TryGetRestrictionsByKey("Tables"))
-    let sColumns = conn.GetSchema("Columns", cfg.Filters.TryGetRestrictionsByKey("Columns"))
     let sViews = conn.GetSchema("Views", cfg.Filters.TryGetRestrictionsByKey("Views"))
 
     // MaterializedViews requires Npgsql v8 or greater (which requires net8 or greater).
@@ -155,34 +154,6 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
             }
         )
 
-    let allColumns =
-        sColumns.Rows
-        |> Seq.cast<DataRow>
-        |> Seq.map (fun col ->
-            let schema = col["TABLE_SCHEMA"] :?> string
-            let table = col["TABLE_NAME"] :?> string
-            let name = col["COLUMN_NAME"] :?> string
-            {
-                ColumnSchema.Catalog = col["TABLE_CATALOG"] :?> string
-                ColumnSchema.Schema = schema
-                ColumnSchema.Table = table
-                ColumnSchema.Name = name
-                ColumnSchema.ProviderTypeName = col["DATA_TYPE"] :?> string
-                ColumnSchema.Ordinal = col["ORDINAL_POSITION"] :?> int
-                ColumnSchema.IsNullable =
-                    match col["IS_NULLABLE"] :?> string with
-                    | "YES" -> true
-                    | _ -> false
-                ColumnSchema.Precision = None
-                ColumnSchema.Scale = None
-                ColumnSchema.IsPrimaryKey = pks.Contains(schema, table, name)
-                ColumnSchema.IsComputed = false
-                ColumnSchema.DefaultValue = None
-            }
-        )
-        |> Seq.sortBy (fun col -> col.Ordinal)
-        |> Seq.toList
-
     let views =
         sViews.Rows
         |> Seq.cast<DataRow>
@@ -230,64 +201,66 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
         |> SchemaFilters.filterTables cfg.Filters
         |> Seq.toList
 
-    let materializedViewColumns =
+    /// Every relation's columns, from `pg_catalog`: `information_schema.columns`, which
+    /// `GetSchema("Columns")` reads, omits materialized views. The type is spelled as Npgsql's
+    /// `GetSchema` spells it, `format_type` of the base type (a domain resolves to what it
+    /// wraps), so the type mappings see the same names for a table, a view or a matview.
+    let columns =
         let sql =
             """
             SELECT
-                pg_namespace.nspname AS table_schema,
-                pg_class.relname AS table_name,
-                pg_class.relkind,
-                pg_attribute.attname AS column_name,
-                pg_attribute.attnum AS ordinal_position,
-                pg_type.typname AS data_type,
-                pg_attribute.attnotnull AS not_null
-            FROM pg_class
-            INNER JOIN pg_namespace on (pg_class.relnamespace = pg_namespace.oid)
-            INNER JOIN pg_attribute on (pg_class.oid = pg_attribute.attrelid)
-            INNER JOIN pg_type on (pg_attribute.atttypid = pg_type.oid)
+                current_database() AS table_catalog,
+                n.nspname AS table_schema,
+                c.relname AS table_name,
+                a.attname AS column_name,
+                a.attnum AS ordinal_position,
+                format_type(COALESCE(NULLIF(t.typbasetype, 0), a.atttypid), NULL) AS data_type,
+                a.attnotnull OR (t.typtype = 'd' AND t.typnotnull) AS not_null
+            FROM pg_attribute a
+            INNER JOIN pg_class c ON c.oid = a.attrelid
+            INNER JOIN pg_namespace n ON n.oid = c.relnamespace
+            INNER JOIN pg_type t ON t.oid = a.atttypid
             WHERE
-                -- get ordinary tables (r), views (v), and materialized views (m)
-                relkind in ('r', 'v', 'm') AND
-                -- filter out any "weird" columns
-                pg_attribute.attnum >= 1 AND
-                -- filter out internal schemas
-                pg_namespace.nspname not in ('pg_catalog', 'information_schema')
-            ORDER BY
-                table_schema,
-                table_name,
-                ordinal_position
-
+                -- tables, views, materialized views, foreign and partitioned tables
+                c.relkind IN ('r', 'v', 'm', 'f', 'p') AND
+                a.attnum >= 1 AND
+                NOT a.attisdropped AND
+                n.nspname NOT IN ('pg_catalog', 'information_schema') AND
+                has_column_privilege(c.oid, a.attnum, 'SELECT, INSERT, UPDATE, REFERENCES')
             """
+
+        // `GetSchema`'s positional restrictions: catalog, schema, table, column; a null matches all.
+        let restrictions = cfg.Filters.TryGetRestrictionsByKey "Columns"
+        let restricted (fields: string list) =
+            fields |> List.indexed |> List.forall (fun (i, field) ->
+                i >= restrictions.Length || isNull restrictions[i] || restrictions[i] = field)
 
         use cmd = new Npgsql.NpgsqlCommand(sql, conn)
         use rdr = cmd.ExecuteReader()
         [
             while rdr.Read() do
-                let schema = rdr["TABLE_SCHEMA"] :?> string
-                let table = rdr["TABLE_NAME"] :?> string
-                let name = rdr["COLUMN_NAME"] :?> string
-                {
-                    ColumnSchema.Catalog = ""
-                    ColumnSchema.Schema = schema
-                    ColumnSchema.Table = table
-                    ColumnSchema.Name = name
-                    ColumnSchema.ProviderTypeName = rdr["DATA_TYPE"] :?> string
-                    ColumnSchema.Ordinal = rdr["ORDINAL_POSITION"] :?> int16 |> int
-                    ColumnSchema.IsNullable = rdr["not_null"] :?> bool |> not
-                    ColumnSchema.Precision = None
-                    ColumnSchema.Scale = None
-                    ColumnSchema.IsPrimaryKey = pks.Contains(schema, table, name)
-                    ColumnSchema.IsComputed = false
-                    ColumnSchema.DefaultValue = None
-                }
+                let catalog = rdr["table_catalog"] :?> string
+                let schema = rdr["table_schema"] :?> string
+                let table = rdr["table_name"] :?> string
+                let name = rdr["column_name"] :?> string
+                if restricted [ catalog; schema; table; name ] then
+                    {
+                        ColumnSchema.Catalog = catalog
+                        ColumnSchema.Schema = schema
+                        ColumnSchema.Table = table
+                        ColumnSchema.Name = name
+                        ColumnSchema.ProviderTypeName = rdr["data_type"] :?> string
+                        ColumnSchema.Ordinal = rdr["ordinal_position"] :?> int16 |> int
+                        ColumnSchema.IsNullable = rdr["not_null"] :?> bool |> not
+                        ColumnSchema.Precision = None
+                        ColumnSchema.Scale = None
+                        ColumnSchema.IsPrimaryKey = pks.Contains(schema, table, name)
+                        ColumnSchema.IsComputed = false
+                        ColumnSchema.DefaultValue = None
+                    }
         ]
-        |> List.sortBy (fun col -> col.Ordinal)
+        |> List.sortBy _.Ordinal
         |> List.groupBy (fun col -> col.Schema, col.Table)
-        |> Map.ofList
-
-    let columnsByTable =
-        allColumns
-        |> List.groupBy (fun col -> col.Catalog, col.Schema, col.Table)
         |> Map.ofList
 
     let tryFindTypeMapping =
@@ -297,12 +270,7 @@ let getSchema (cfg: Config, isLegacy: bool, extensions: IExtendTypeMapping list)
     let tables =
         includedRelations
         |> Seq.choose (fun tbl ->
-            let tableCols =
-                // information_schema.columns omits materialized views, so theirs come from pg_catalog.
-                (if tbl.Type = "materialized view"
-                 then materializedViewColumns |> Map.tryFind (tbl.Schema, tbl.Name)
-                 else columnsByTable |> Map.tryFind (tbl.Catalog, tbl.Schema, tbl.Name))
-                |> Option.defaultValue []
+            let tableCols = columns |> Map.tryFind (tbl.Schema, tbl.Name) |> Option.defaultValue []
 
             let tableSchema =
                 {

@@ -477,4 +477,20 @@ let ``Column filters apply to materialized views too``() =
         (NpgsqlSchemaProvider.getSchema(filterCfg filters, false, [])).Tables
         |> List.find (fun tbl -> $"{tbl.Schema}/{tbl.Name}" = "person/vstateprovincecountryregion")
     set [ for col in matView.Columns -> col.Name ]
-        =! set [ "stateprovinceid"; "stateprovincename"; "countryregioncode"; "countryregionname" ]
+        =! set [ "stateprovinceid"; "stateprovincecode"; "isonlystateprovinceflag"; "stateprovincename"; "countryregioncode"; "countryregionname" ]
+
+[<Test>]
+let ``A materialized view's columns are typed like a table's``() =
+    // `char(n)` and the `Flag` and `Name` domains resolve to their base types, as they do on a table.
+    let filters = { Filters.Empty with Includes = [ "*"; "*.*" ] }
+    let matView =
+        (NpgsqlSchemaProvider.getSchema(filterCfg filters, false, [])).Tables
+        |> List.find (fun tbl -> $"{tbl.Schema}/{tbl.Name}" = "person/vstateprovincecountryregion")
+    set [ for col in matView.Columns -> col.Name, col.TypeMapping.ProviderDbType ]
+        =! set [ "stateprovinceid", Some "Integer"
+                 "stateprovincecode", Some "Char"
+                 "isonlystateprovinceflag", Some "Boolean"
+                 "stateprovincename", Some "Varchar"
+                 "territoryid", Some "Integer"
+                 "countryregioncode", Some "Varchar"
+                 "countryregionname", Some "Varchar" ]
