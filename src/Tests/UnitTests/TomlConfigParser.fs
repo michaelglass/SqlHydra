@@ -221,32 +221,32 @@ let private general =
 
 /// Reads a config that should be rejected and returns the error message.
 let private readError (toml: string) =
-    Assert.Catch(fun () -> TomlConfigParser.read toml |> ignore).Message.Trim()
+    Assert.Throws<Exception>(fun () -> TomlConfigParser.read toml |> ignore).Message
 
 [<Test>]
 let ``Read: missing required key names the section and key``() =
     readError (general.Replace("namespace = \"SampleApp.AdventureWorks\"", ""))
-    =! "(7,5) : error : Missing required TOML key 'namespace' when deserializing 'SqlHydra.TomlConfigParser+GeneralSection'."
+    =! "[general] is missing required key 'namespace'."
 
 [<Test>]
 let ``Read: wrong value type names the key``() =
     readError (general.Replace("cli_mutable = true", "cli_mutable = \"yes\""))
-    =! "(6,19) : error : Expected Boolean token but was String."
+    =! "[general] key 'cli_mutable' should be a Boolean, but is a String."
 
 [<Test>]
 let ``Read: a boolean where a string belongs is rejected``() =
     readError (general.Replace("connection = \"Data Source=localhost\"", "connection = true"))
-    =! "(3,18) : error : Expected String token but was Boolean."
+    =! "[general] key 'connection' should be a String, but is a Boolean."
 
 [<Test>]
 let ``Read: a string where an array belongs is rejected``() =
     readError (general + "[filters]\ninclude = \"dbo/*\"")
-    =! "(8,11) : error : Expected StartArray token but was String."
+    =! "[filters] key 'include' should be an Array, but is a String."
 
 [<Test>]
 let ``Read: a number in a restrictions array is rejected``() =
     readError (general + "[filters]\nrestrictions = { \"Tables\" = [ 1 ] }")
-    =! "(8,31) : error : Expected String token but was Integer."
+    =! "[filters.restrictions] key 'Tables' should be a String, but is an Integer."
 
 [<Test>]
 let ``Read: unknown keys and sections are ignored``() =

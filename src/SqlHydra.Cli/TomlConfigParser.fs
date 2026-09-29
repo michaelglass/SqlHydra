@@ -1,9 +1,11 @@
 ﻿module SqlHydra.TomlConfigParser
 
 open System.Collections.Generic
+open System.Text.RegularExpressions
 open System.Text.Json
 open System.Text.Json.Serialization
 open Tomlyn
+open Tomlyn.Parsing
 open Tomlyn.Serialization
 open Tomlyn.Syntax
 open Domain
@@ -49,11 +51,47 @@ type TomlFile() =
 
 let private options = TomlSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower)
 
+let private keyName (key: KeySyntax) = key.ToString().Trim().Trim('"')
+
+let private withArticle (kind: string) =
+    if "AEIOU".Contains kind[0] then $"an {kind}" else $"a {kind}"
+
+/// Finds the section and key of the value at `position`, looking inside inline tables.
+let rec private keyAt (section: string) (items: KeyValueSyntax seq) position =
+    items |> Seq.tryPick (fun item ->
+        let span = item.Span
+        if (span.Start.Line, span.Start.Column) <= position && position <= (span.End.Line, span.End.Column) then
+            match item.Value with
+            | :? InlineTableSyntax as table -> keyAt $"{section}.{keyName item.Key}" (table.Items |> Seq.map (fun i -> i.KeyValue)) position
+            | _ -> Some (section, keyName item.Key)
+        else None)
+
+/// Rewords a Tomlyn error to name the section and key. Tomlyn's message names the type that is
+/// missing a required key, and its position points at a value of the wrong type.
+let private describe (toml: string) (ex: TomlException) =
+    let missing = Regex.Match(ex.Message, @"Missing required TOML key '(\w+)' when deserializing '.*\+(\w+)'")
+    let wrongType = Regex.Match(ex.Message, @"Expected (\w+) token but was (\w+)")
+    let kind (m: Match) (i: int) = withArticle (m.Groups[i].Value.Replace("Start", "")) // StartArray -> Array
+    if missing.Success then
+        let section =
+            match missing.Groups[2].Value with
+            | "TomlFile" -> "The config"
+            | owner -> "[" + JsonNamingPolicy.SnakeCaseLower.ConvertName(owner.Replace("Section", "")) + "]"
+        $"{section} is missing required key '{missing.Groups[1].Value}'."
+    elif wrongType.Success && ex.Line.HasValue then
+        let position = (ex.Line.Value - 1, ex.Column.Value - 1)
+        match SyntaxParser.Parse(toml).Tables |> Seq.tryPick (fun table -> keyAt (keyName table.Name) table.Items position) with
+        | Some (section, key) -> $"[{section}] key '{key}' should be {kind wrongType 1}, but is {kind wrongType 2}."
+        | None -> ex.Message
+    else ex.Message
+
 /// Reads .toml file and returns a Config.
 let read(toml: string) =
 
     // NOTE: New configuration keys should be parsed gracefully so as to not break older versions!
-    let file = TomlSerializer.Deserialize<TomlFile>(toml, options)
+    let file =
+        try TomlSerializer.Deserialize<TomlFile>(toml, options)
+        with :? TomlException as ex -> failwith (describe toml ex)
     let general = file.General
     let queryIntegration = Option.ofObj file.QueryIntegration
 
