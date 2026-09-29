@@ -170,6 +170,71 @@ let ``Read: should parse schema restrictions``() =
 
     cfg.Filters =! expectedFilters
 
+let private readFilters (filters: string) =
+    let toml =
+        $"""
+        [general]
+        connection = "Data Source=localhost"
+        output = "AdventureWorks.fs"
+        namespace = "SampleApp.AdventureWorks"
+        cli_mutable = true
+        [filters]
+        {filters}
+        """
+    (TomlConfigParser.read toml).Filters
+
+[<Test>]
+let ``Read: filters with include but no exclude``() =
+    readFilters """include = [ "dbo/*" ]""" =! { Filters.Empty with Includes = [ "dbo/*" ] }
+
+[<Test>]
+let ``Read: filters with exclude but no include``() =
+    readFilters """exclude = [ "dbo/temp*" ]""" =! { Filters.Empty with Excludes = [ "dbo/temp*" ] }
+
+[<Test>]
+let ``Read: filters with only restrictions``() =
+    readFilters """restrictions = { "Tables" = [ "products" ] }"""
+    =! { Filters.Empty with Restrictions = Map [ "Tables", [| "products" |] ] }
+
+[<Test>]
+let ``Read: query integration without provider_db_type_attributes defaults to true``() =
+    let toml =
+        """
+        [general]
+        connection = "Data Source=localhost"
+        output = "AdventureWorks.fs"
+        namespace = "SampleApp.AdventureWorks"
+        cli_mutable = true
+        [sqlhydra_query_integration]
+        table_declarations = true
+        """
+    (TomlConfigParser.read toml).ProviderDbTypeAttributes =! true
+
+[<Test>]
+let ``Read: missing required key names the section and key``() =
+    let toml =
+        """
+        [general]
+        connection = "Data Source=localhost"
+        output = "AdventureWorks.fs"
+        cli_mutable = true
+        """
+    let ex = Assert.Throws<Exception>(fun () -> TomlConfigParser.read toml |> ignore)
+    ex.Message =! "Missing required key 'namespace' in the [general] section."
+
+[<Test>]
+let ``Read: wrong value type names the key``() =
+    let toml =
+        """
+        [general]
+        connection = "Data Source=localhost"
+        output = "AdventureWorks.fs"
+        namespace = "SampleApp.AdventureWorks"
+        cli_mutable = "yes"
+        """
+    let ex = Assert.Catch(fun () -> TomlConfigParser.read toml |> ignore)
+    test <@ ex.Message.Contains "cli_mutable" @>
+
 [<Test>]
 let ``Save then Read: round trips``() =
     let cfg =
