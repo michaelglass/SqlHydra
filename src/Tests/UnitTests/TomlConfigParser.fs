@@ -210,30 +210,48 @@ let ``Read: query integration without provider_db_type_attributes defaults to tr
         """
     (TomlConfigParser.read toml).ProviderDbTypeAttributes =! true
 
+let private general =
+    """
+    [general]
+    connection = "Data Source=localhost"
+    output = "AdventureWorks.fs"
+    namespace = "SampleApp.AdventureWorks"
+    cli_mutable = true
+    """
+
+/// Reads a config that should be rejected and returns the error message.
+let private readError (toml: string) =
+    Assert.Throws<Exception>(fun () -> TomlConfigParser.read toml |> ignore).Message
+
 [<Test>]
 let ``Read: missing required key names the section and key``() =
-    let toml =
-        """
-        [general]
-        connection = "Data Source=localhost"
-        output = "AdventureWorks.fs"
-        cli_mutable = true
-        """
-    let ex = Assert.Throws<Exception>(fun () -> TomlConfigParser.read toml |> ignore)
-    ex.Message =! "Missing required key 'namespace' in the [general] section."
+    readError (general.Replace("namespace = \"SampleApp.AdventureWorks\"", ""))
+    =! "[general] is missing required key 'namespace'."
 
 [<Test>]
 let ``Read: wrong value type names the key``() =
-    let toml =
-        """
-        [general]
-        connection = "Data Source=localhost"
-        output = "AdventureWorks.fs"
-        namespace = "SampleApp.AdventureWorks"
-        cli_mutable = "yes"
-        """
-    let ex = Assert.Catch(fun () -> TomlConfigParser.read toml |> ignore)
-    test <@ ex.Message.Contains "cli_mutable" @>
+    readError (general.Replace("cli_mutable = true", "cli_mutable = \"yes\""))
+    =! "[general] key 'cli_mutable' should be a Boolean, but is a String."
+
+[<Test>]
+let ``Read: a boolean where a string belongs is rejected``() =
+    readError (general.Replace("connection = \"Data Source=localhost\"", "connection = true"))
+    =! "[general] key 'connection' should be a String, but is a Boolean."
+
+[<Test>]
+let ``Read: a string where an array belongs is rejected``() =
+    readError (general + "[filters]\ninclude = \"dbo/*\"")
+    =! "[filters] key 'include' should be an Array, but is a String."
+
+[<Test>]
+let ``Read: a number in a restrictions array is rejected``() =
+    readError (general + "[filters]\nrestrictions = { \"Tables\" = [ 1 ] }")
+    =! "[filters.restrictions] key 'Tables' should be a String, but is an Integer."
+
+[<Test>]
+let ``Read: unknown keys and sections are ignored``() =
+    let toml = general + "future_key = 1\n[future_section]\nkey = \"value\"\n[sqlhydra_query_integration]\nfuture_key = true"
+    (TomlConfigParser.read toml).TableDeclarations =! true
 
 [<Test>]
 let ``Save then Read: round trips``() =
