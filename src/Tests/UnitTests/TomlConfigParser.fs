@@ -169,3 +169,23 @@ let ``Read: should parse schema restrictions``() =
     let cfg = TomlConfigParser.read(toml)
 
     cfg.Filters =! expectedFilters
+
+[<Test>]
+let ``Save then Read: round trips``() =
+    let cfg =
+        {
+            ConnectionString = "Data Source=localhost"
+            OutputFile = "AdventureWorks.fs"
+            Namespace = "SampleApp.AdventureWorks"
+            IsCLIMutable = true
+            IsMutableProperties = false
+            NullablePropertyType = NullablePropertyType.Option
+            ProviderDbTypeAttributes = false
+            TableDeclarations = true
+            LeftJoinedViews = true
+            Readers = Some { ReadersConfig.ReaderType = "Microsoft.Data.SqlClient.SqlDataReader" }
+            Filters = { Filters.Empty with Includes = [ "dbo/*" ]; Excludes = [ "dbo/temp*" ] }
+            TypeMappingExtensions = [ "SqlHydra.Extensions.NodaTime" ]
+        }
+
+    TomlConfigParser.read (TomlConfigParser.save cfg) =! cfg
