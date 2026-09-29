@@ -1,101 +1,91 @@
 ﻿module SqlHydra.TomlConfigParser
 
+open System.Collections.Generic
+open System.Text.Json
+open System.Text.Json.Serialization
 open Tomlyn
-open Tomlyn.Model
+open Tomlyn.Serialization
 open Tomlyn.Syntax
 open Domain
 
-type TomlTable with
+// The shape of a sqlhydra.toml file. Each snake_case key maps onto the matching PascalCase
+// property (`cli_mutable` -> `CliMutable`); a key left out of the file keeps the default declared here.
 
-    member this.Get<'T>(name: string) = 
-        this.Item(name) :?> 'T
+type GeneralSection() =
+    [<TomlRequired>] member val Connection = "" with get, set
+    [<TomlRequired>] member val Output = "" with get, set
+    [<TomlRequired>] member val Namespace = "" with get, set
+    [<TomlRequired>] member val CliMutable = false with get, set
+    member val MutableProperties = false with get, set
+    member val NullablePropertyType = "option" with get, set
 
-    member this.TryGet<'T>(name: string) =
-        if this.ContainsKey(name)
-        then Some (this.Item(name) :?> 'T)
-        else None
+[<AllowNullLiteral>]
+type ReadersSection() =
+    [<TomlRequired>] member val ReaderType = "" with get, set
+
+type FiltersSection() =
+    member val Include: string array = [||] with get, set
+    member val Exclude: string array = [||] with get, set
+    member val Restrictions = Dictionary<string, string array>() with get, set
+
+type ExtensionsSection() =
+    member val TypeMappings: string array = [||] with get, set
+
+[<AllowNullLiteral>]
+type QueryIntegrationSection() =
+    member val ProviderDbTypeAttributes = true with get, set
+    member val TableDeclarations = true with get, set
+    /// Absent means false so existing codebases see no change; the init wizard writes
+    /// `left_joined_views = true` into new configs.
+    member val LeftJoinedViews = false with get, set
+
+type TomlFile() =
+    [<TomlRequired>] member val General = GeneralSection() with get, set
+    member val Readers: ReadersSection = null with get, set
+    member val Filters = FiltersSection() with get, set
+    member val Extensions = ExtensionsSection() with get, set
+    [<JsonPropertyName("sqlhydra_query_integration")>]
+    member val QueryIntegration: QueryIntegrationSection = null with get, set
+
+let private options = TomlSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower)
 
 /// Reads .toml file and returns a Config.
 let read(toml: string) =
 
     // NOTE: New configuration keys should be parsed gracefully so as to not break older versions!
-    let doc = Toml.Parse toml
-    let model = doc.ToModel()
-    let generalTable = model.Get<TomlTable> "general"
-    let readersTableMaybe = model.TryGet<TomlTable> "readers"
-    let filtersTableMaybe = model.TryGet<TomlTable> "filters"
-    let extensionsTableMaybe = model.TryGet<TomlTable> "extensions"
-    let queryIntegrationTableMaybe = model.TryGet<TomlTable> "sqlhydra_query_integration"
+    let file = TomlSerializer.Deserialize<TomlFile>(toml, options)
+    let general = file.General
+    let queryIntegration = Option.ofObj file.QueryIntegration
 
     {
-        Config.ConnectionString = generalTable.Get "connection"
-        Config.OutputFile = generalTable.Get "output"
-        Config.Namespace = generalTable.Get "namespace"
-        Config.IsCLIMutable = generalTable.Get "cli_mutable"
-        Config.IsMutableProperties = generalTable.TryGet "mutable_properties" |> Option.defaultValue false
+        Config.ConnectionString = general.Connection
+        Config.OutputFile = general.Output
+        Config.Namespace = general.Namespace
+        Config.IsCLIMutable = general.CliMutable
+        Config.IsMutableProperties = general.MutableProperties
         Config.NullablePropertyType = 
-            generalTable.TryGet "nullable_property_type" 
-            |> Option.map (fun (value: string) -> 
-                match value.ToLower() with
-                | "option" -> NullablePropertyType.Option
-                | "nullable" -> NullablePropertyType.Nullable
-                | _ -> NullablePropertyType.Option
-            )
-            |> Option.defaultValue NullablePropertyType.Option
-        Config.ProviderDbTypeAttributes = 
-            match queryIntegrationTableMaybe with
-            | Some queryIntegrationTable -> queryIntegrationTable.Get "provider_db_type_attributes"
-            | None -> true // Default to true if missing
-        Config.TableDeclarations =
-            match queryIntegrationTableMaybe with
-            | Some queryIntegrationTable ->
-                match queryIntegrationTable.TryGet "table_declarations" with
-                | Some tblDecl -> tblDecl
-                | None -> true // Default to true [sqlhydra_query_integration] table already exists
-            | None -> false // Default to false if [sqlhydra_query_integration] table is missing
-        Config.LeftJoinedViews =
-            // Absent means false so existing codebases see no change; the init wizard writes
-            // `left_joined_views = true` into new configs.
-            queryIntegrationTableMaybe
-            |> Option.bind (fun queryIntegrationTable -> queryIntegrationTable.TryGet "left_joined_views")
-            |> Option.defaultValue false
-        Config.Readers = 
-            readersTableMaybe
-            |> Option.map (fun rdrsTbl -> 
-                {
-                    ReadersConfig.ReaderType = rdrsTbl.Get<string> "reader_type"
-                }
-            )
-        Config.TypeMappingExtensions =
-            match extensionsTableMaybe with
-            | Some extTable ->
-                extTable.TryGet "type_mappings"
-                |> Option.map (Seq.cast<string> >> Seq.toList)
-                |> Option.defaultValue []
-            | None -> []
+            match general.NullablePropertyType.ToLower() with
+            | "nullable" -> NullablePropertyType.Nullable
+            | _ -> NullablePropertyType.Option
+        // Without a [sqlhydra_query_integration] section, provider attributes are on and table declarations off.
+        Config.ProviderDbTypeAttributes = queryIntegration |> Option.forall (fun section -> section.ProviderDbTypeAttributes)
+        Config.TableDeclarations = queryIntegration |> Option.exists (fun section -> section.TableDeclarations)
+        Config.LeftJoinedViews = queryIntegration |> Option.exists (fun section -> section.LeftJoinedViews)
+        Config.Readers = file.Readers |> Option.ofObj |> Option.map (fun readers -> { ReadersConfig.ReaderType = readers.ReaderType })
+        Config.TypeMappingExtensions = file.Extensions.TypeMappings |> Array.toList
         Config.Filters =
-            match filtersTableMaybe with
-            | Some filtersTable -> 
-                {
-                    Filters.Includes = filtersTable.Get "include" |> Seq.cast<string> |> Seq.toList
-                    Filters.Excludes = filtersTable.Get "exclude" |> Seq.cast<string> |> Seq.toList
-                    Filters.Restrictions = 
-                        match filtersTable.TryGet<TomlTable> "restrictions" with
-                        | Some restrictions -> 
-                            restrictions 
-                            |> Seq.map (fun kvp -> 
-                                kvp.Key, 
-                                    kvp.Value :?> TomlArray 
-                                    |> Seq.cast<string> 
-                                    |> Seq.toArray 
-                                    |> Array.map (fun s -> if s = "" then null else s) // GetSchema expects nulls for missing values, not empty strings.
-                            )
-                            |> Map.ofSeq
-                        | None ->
-                            Map.empty
-                }
-            | None ->
-                Filters.Empty
+            {
+                Filters.Includes = file.Filters.Include |> Array.toList
+                Filters.Excludes = file.Filters.Exclude |> Array.toList
+                Filters.Restrictions = 
+                    file.Filters.Restrictions
+                    |> Seq.map (fun kvp -> 
+                        kvp.Key, 
+                            kvp.Value 
+                            |> Array.map (fun s -> if s = "" then null else s) // GetSchema expects nulls for missing values, not empty strings.
+                    )
+                    |> Map.ofSeq
+            }
     }
 
 /// Saves a Config to .toml file.
